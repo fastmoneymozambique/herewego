@@ -43,18 +43,21 @@ const sendTokenResponse = (user, statusCode, res) => {
 
 /**
  * Cria o admin inicial se nenhum admin existir.
+ * Esta função é chamada uma única vez na inicialização do server.js.
  */
 const createInitialAdmin = async () => {
     try {
         const adminExists = await User.findOne({ isAdmin: true });
         if (!adminExists) {
             // Verifica se um usuário com o número de telefone 848441231 já existe para evitar erro de visitorId único
-            const existingUser = await User.findOne({ phoneNumber: '848441231' });
+            const existingUserWithPhoneNumber = await User.findOne({ phoneNumber: '848441231' });
 
-            if (existingUser) {
-                // Se o número de telefone já existe, mas não é admin, podemos atualizá-lo ou logar um erro
-                logError('Tentativa de criar admin inicial, mas número de telefone já existe para um não-admin. Por favor, remova ou use outro número.');
-                return;
+            if (existingUserWithPhoneNumber) {
+                // Se o número de telefone já existe, e o admin ainda não foi criado (adminExists === false),
+                // isso significa uma inconsistência ou uma tentativa anterior falha.
+                // Logamos o erro mas não tentamos criar novamente para evitar duplicidade.
+                logError('Tentativa de criar admin inicial, mas um usuário com o número de telefone 848441231 já existe e não é admin. Por favor, remova ou use outro número para o admin inicial.', { existingUserId: existingUserWithPhoneNumber._id });
+                return; // Impede a criação se o número já estiver em uso.
             }
 
             const initialAdmin = await User.create({
@@ -66,21 +69,19 @@ const createInitialAdmin = async () => {
                 referralCode: generateReferralCode(),
             });
             logInfo('Admin inicial criado com sucesso: 848441231 / 147258');
-
-            // Garante que existe uma configuração AdminConfig
-            let adminConfig = await AdminConfig.findOne();
-            if (!adminConfig) {
-                adminConfig = await AdminConfig.create({}); // Cria com defaults
-                logInfo('AdminConfig inicial criada.');
-            }
         } else {
-            // Garante que existe uma configuração AdminConfig mesmo que já haja admin
-            let adminConfig = await AdminConfig.findOne();
-            if (!adminConfig) {
-                adminConfig = await AdminConfig.create({}); // Cria com defaults
-                logInfo('AdminConfig inicial criada.');
-            }
+            logInfo('Admin inicial já existe. Pulando a criação.');
         }
+
+        // Garante que existe uma configuração AdminConfig, independentemente de já haver admin
+        let adminConfig = await AdminConfig.findOne();
+        if (!adminConfig) {
+            adminConfig = await AdminConfig.create({}); // Cria com defaults
+            logInfo('AdminConfig inicial criada.');
+        } else {
+            logInfo('AdminConfig já existe.');
+        }
+
     } catch (error) {
         if (error.code === 11000) { // Erro de duplicidade (visitorId ou phoneNumber)
             logError(`Erro ao criar admin inicial: Já existe um usuário com o mesmo Visitor ID ou número de telefone.`, { error: error.message });
@@ -89,9 +90,6 @@ const createInitialAdmin = async () => {
         }
     }
 };
-
-// Chamar a função para criar o admin inicial
-createInitialAdmin();
 
 
 // --- User Controllers ---
@@ -158,8 +156,7 @@ const registerUser = async (req, res) => {
                     return res.status(400).json({ message: 'Não é possível se indicar ou indicar contas do mesmo dispositivo.' });
                 }
                 // Adiciona o novo usuário à lista de referidos do convidante
-                invitingUser.referredUsers.push(null); // Temporariamente null, será preenchido após a criação do novo user
-                // Não salva aqui para evitar erro de concorrência, atualiza após a criação do user
+                // Será preenchido com o _id do novo usuário após a criação
             } else {
                 logInfo(`Código de indicação inválido: ${invitedBy} para ${phoneNumber}`);
             }
@@ -492,9 +489,7 @@ const activateInvestment = async (req, res) => {
                     logInfo(`Comissão de ativação de plano (${commissionAmount} MT) creditada para o convidante ${inviter.phoneNumber}.`, { inviterId: inviter._id, inviteeId: user._id, commissionAmount });
                 }
 
-                // TODO: Adicionar lógica para a comissão sobre renda diária.
-                // Isso será tratado pela tarefa agendada que processa lucros diários,
-                // verificando se o investimento atual é referido por alguém.
+                // A comissão sobre renda diária será tratada pela tarefa agendada
             }
         }
 
@@ -846,7 +841,10 @@ const getAdminConfig = async (req, res) => {
     try {
         const config = await AdminConfig.findOne();
         if (!config) {
-            return res.status(404).json({ message: 'Configurações administrativas não encontradas.' });
+            // Se não houver config, crie uma com valores padrão
+            const newConfig = await AdminConfig.create({});
+            logInfo('AdminConfig não encontrada, uma nova foi criada com valores padrão.');
+            return res.status(200).json({ success: true, config: newConfig });
         }
         res.status(200).json({ success: true, config });
     } catch (error) {
@@ -867,7 +865,7 @@ const updateAdminConfig = async (req, res) => {
     try {
         let config = await AdminConfig.findOne(); // Busca a única instância
         if (!config) {
-            // Se não existir, cria uma nova (embora createInitialAdmin já tente fazer isso)
+            // Se não existir, cria uma nova
             config = await AdminConfig.create({});
             logInfo('AdminConfig criada durante tentativa de atualização, pois não existia.');
         }
@@ -1070,7 +1068,7 @@ const getBlockedUsers = async (req, res) => {
 /**
  * @desc    Processa lucros diários para investimentos ativos e encerra investimentos completos.
  *          Esta função seria idealmente chamada por um CRON job ou serviço agendado.
- * @route   GET /api/internal/process-daily-profits (Protegida por API Key ou IP whitelist em produção)
+ * @route   POST /api/internal/process-daily-profits (Protegida por API Key ou IP whitelist em produção)
  * @access  Private (Internal/Scheduled Task)
  */
 const processDailyProfitsAndCommissions = async (req, res) => {
@@ -1203,5 +1201,5 @@ module.exports = {
     changeUserPasswordByAdmin,
     getBlockedUsers,
     processDailyProfitsAndCommissions,
-    createInitialAdmin, // Exportar apenas para fins de debug ou verificação, não para rota direta
+    createInitialAdmin, // Exportado para ser chamado APENAS no server.js
 };
