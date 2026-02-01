@@ -245,7 +245,13 @@ const getUserProfile = async (req, res) => {
     try {
         // req.user é populado pelo middleware protect
         const user = await User.findById(req.user._id)
-            .populate('activeInvestments')
+            .populate({ // População aninhada para obter o nome do plano de investimento
+                path: 'activeInvestments',
+                populate: {
+                    path: 'planId', // Popula o 'planId' dentro de cada 'activeInvestment'
+                    select: 'name'  // Seleciona apenas o campo 'name' do plano
+                }
+            })
             .populate('depositHistory')
             .populate('withdrawalHistory')
             .populate('referredUsers', 'phoneNumber status'); // Popula apenas o telefone e status dos referidos
@@ -265,7 +271,7 @@ const getUserProfile = async (req, res) => {
                 visitorId: user.visitorId,
                 referralCode: user.referralCode,
                 invitedBy: user.invitedBy,
-                activeInvestments: user.activeInvestments,
+                activeInvestments: user.activeInvestments, // Agora inclui o nome do plano
                 depositHistory: user.depositHistory,
                 withdrawalHistory: user.withdrawalHistory,
                 referredUsers: user.referredUsers,
