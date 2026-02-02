@@ -251,7 +251,7 @@ const withdrawalSchema = new mongoose.Schema({
         required: [true, 'Valor do saque é obrigatório.'],
         min: [1, 'O valor do saque deve ser maior que zero.'],
     },
-    walletAddress: { // Ou outro detalhe de pagamento (ex: Mpesa number)
+    walletAddress: { // Detalhes de pagamento consolidados (Método, Nome, Número)
         type: String,
         required: [true, 'Endereço da carteira ou detalhes de pagamento são obrigatórios.'],
         trim: true,
@@ -307,6 +307,31 @@ const adminConfigSchema = new mongoose.Schema({
         min: [0, 'Comissão de lucro diário não pode ser negativa.'],
         max: [1, 'Comissão de lucro diário não pode ser maior que 1 (100%).'],
     },
+    
+    // --- Configurações de Depósito (NOVOS CAMPOS) ---
+    minDepositAmount: {
+        type: Number,
+        default: 50, // Mínimo de 50 MT
+        min: [1, 'Valor mínimo de depósito deve ser 1 ou mais.'],
+    },
+    mpesaDepositNumber: {
+        type: String,
+        default: '841234567', // Número M-Pesa padrão (ADMIN deve configurar)
+    },
+    mpesaRecipientName: {
+        type: String,
+        default: 'KKR M-PESA ADMIN', // Nome do beneficiário (ADMIN deve configurar)
+    },
+    emolaDepositNumber: {
+        type: String,
+        default: '879876543', // Número Emola padrão (ADMIN deve configurar)
+    },
+    emolaRecipientName: {
+        type: String,
+        default: 'KKR EMOLA ADMIN', // Nome do beneficiário (ADMIN deve configurar)
+    },
+    // --- FIM DOS NOVOS CAMPOS ---
+
     // Garante que só haverá um documento de configurações
     singletonId: {
         type: Number,

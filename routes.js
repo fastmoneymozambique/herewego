@@ -35,6 +35,7 @@ const {
     changeUserPasswordByAdmin,
     getBlockedUsers,
     processDailyProfitsAndCommissions,
+    getDepositConfig, // NOVO: Controlador para obter configurações de depósito
 } = require('./controllers'); // Importa todos os controladores
 const { protect, authorizeAdmin } = require('./middleware'); // Importa os middlewares de segurança
 
@@ -50,6 +51,9 @@ const appRoutes = (app) => {
     router.post('/register', registerUser);
     router.post('/login', loginUser);
     router.get('/profile', protect, getUserProfile); // Perfil do usuário logado
+
+    // --- Rotas de Configuração Pública (Novo para o Checkout) ---
+    router.get('/deposit-config', getDepositConfig); // NOVO ENDPOINT: Configs de depósito M-Pesa/Emola
 
     // --- Rotas de Planos de Investimento (Públicas para leitura, Admin para CRUD) ---
     router.get('/investmentplans', getInvestmentPlans); // Todos podem ver os planos
@@ -100,12 +104,7 @@ const appRoutes = (app) => {
 
     // --- Rota Interna para Tarefas Agendadas (CRON) ---
     // ATENÇÃO: Esta rota deve ser rigorosamente protegida em produção.
-    // Considere usar uma chave de API secreta, IP whitelist ou JWT específico para CRON jobs.
-    // Para fins de demonstração, vamos protegê-la com admin auth, mas não é o ideal para CRON real.
-    // Um CRON job não deveria logar como admin de usuário normal.
     router.post('/internal/process-daily-profits', protect, authorizeAdmin, processDailyProfitsAndCommissions);
-    // Idealmente, você teria um mecanismo como:
-    // router.post('/internal/process-daily-profits', verifyInternalApiKey, processDailyProfitsAndCommissions);
 
 
     // Conecta todas as rotas definidas com o prefixo /api
