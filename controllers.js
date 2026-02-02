@@ -5,6 +5,12 @@
 const { User, InvestmentPlan, Investment, Deposit, Withdrawal, AdminConfig } = require('./models');
 const { logInfo, logError, logAdminAction, generateReferralCode } = require('./utils');
 const bcrypt = require('bcryptjs'); // Para comparar senhas em login
+const fs = require('fs'); // Para ler arquivos de log
+const path = require('path'); // Para resolver caminhos de arquivo
+
+// Caminho para o arquivo de log de ações administrativas
+const ADMIN_ACTION_LOG_FILE = path.join(__dirname, 'logs', 'admin_actions.log');
+
 
 // --- Funções Auxiliares Internas ---
 
@@ -275,6 +281,7 @@ const getUserProfile = async (req, res) => {
                 withdrawalHistory: user.withdrawalHistory,
                 referredUsers: user.referredUsers,
                 createdAt: user.createdAt,
+                lastLoginAt: user.lastLoginAt, // ADICIONADO: Último login para a página de Perfil
             }
         });
     } catch (error) {
@@ -322,11 +329,11 @@ const createInvestmentPlan = async (req, res) => {
     }
 };
 
-
 /**
  * @desc    Obter todos os planos de investimento
- * @route   GET /api/investmentplans
- * @access  Public
+ * @route   GET /api/investmentplans (público)
+ * @route   GET /api/admin/investmentplans (admin)
+ * @access  Public / Private (Admin)
  */
 const getInvestmentPlans = async (req, res) => {
     try {
@@ -342,7 +349,6 @@ const getInvestmentPlans = async (req, res) => {
         res.status(500).json({ message: 'Erro ao obter planos de investimento.' });
     }
 };
-
 
 /**
  * @desc    Obter um plano de investimento por ID
@@ -851,13 +857,14 @@ const rejectWithdrawal = async (req, res) => {
 // --- Admin Panel Controllers ---
 
 /**
- * @desc    Obter configurações de depósito (M-Pesa/Emola)
+ * @desc    Obter configurações de depósito (M-Pesa/Emola) E PROMOÇÃO
  * @route   GET /api/deposit-config
- * @access  Public (Usado pelo Frontend para o Checkout)
+ * @access  Public (Usado pelo Frontend para o Checkout e Dashboard/Invite)
  */
 const getDepositConfig = async (req, res) => {
     try {
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName commissionOnDailyProfit');
+        // CORREÇÃO CRÍTICA: Incluindo todos os campos necessários para o frontend
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit');
         
         if (!config) {
             // Se não houver config, cria uma com valores padrão antes de retornar
@@ -881,7 +888,9 @@ const getDepositConfig = async (req, res) => {
  */
 const getAdminConfig = async (req, res) => {
     try {
-        const config = await AdminConfig.findOne();
+        // Usa o mesmo seletor que o getDepositConfig para consistência
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit');
+        
         if (!config) {
             // Se não houver config, crie uma com valores padrão
             const newConfig = await AdminConfig.create({});
@@ -1122,6 +1131,34 @@ const getBlockedUsers = async (req, res) => {
     }
 };
 
+/**
+ * @desc    Obter Logs de Ações Administrativas (Admin)
+ * @route   GET /api/admin/logs/admin-actions
+ * @access  Private (Admin)
+ */
+const getAdminLogs = async (req, res) => {
+    try {
+        // 1. Verifica se o arquivo de log existe
+        if (!fs.existsSync(ADMIN_ACTION_LOG_FILE)) {
+            return res.status(200).json({ success: true, logs: [], message: 'Arquivo de log não encontrado.' });
+        }
+
+        // 2. Lê o conteúdo do arquivo
+        const data = fs.readFileSync(ADMIN_ACTION_LOG_FILE, 'utf8');
+        
+        // 3. Divide por linha, filtra linhas vazias e inverte (mais recente primeiro)
+        const logs = data.split('\n').filter(line => line.trim() !== '').reverse(); 
+        
+        // NOTA: O frontend fará o JSON.parse de cada linha.
+        res.status(200).json({ success: true, logs });
+
+    } catch (error) {
+        logError(`Erro ao ler logs de admin: ${error.message}`, { stack: error.stack, adminId: req.user._id });
+        res.status(500).json({ message: 'Erro ao obter logs de atividade administrativa.' });
+    }
+};
+
+
 // --- Funções de CRON / Tarefas Agendadas (chamadas por rotas internas/jobs) ---
 
 /**
@@ -1259,4 +1296,5 @@ module.exports = {
     processDailyProfitsAndCommissions,
     createInitialAdmin, // Exportado para ser chamado APENAS no server.js
     getDepositConfig, // NOVO: Para obter as configurações de depósito M-Pesa/Emola
+    getAdminLogs, // NOVO: Para obter logs de atividade do admin
 };
