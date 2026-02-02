@@ -857,7 +857,7 @@ const rejectWithdrawal = async (req, res) => {
  */
 const getDepositConfig = async (req, res) => {
     try {
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName');
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName commissionOnDailyProfit');
         
         if (!config) {
             // Se não houver config, cria uma com valores padrão antes de retornar
