@@ -74,6 +74,12 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Withdrawal',
     }],
+    // --- NOVO CAMPO: Para rastrear se o bônus fixo de indicação já foi creditado ---
+    hasReceivedReferralBonus: { 
+        type: Boolean,
+        default: false,
+    },
+    // --- FIM NOVO CAMPO ---
     lastLoginIp: String, // Para fins informativos/logs
     lastLoginAt: Date,
     createdAt: {

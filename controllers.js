@@ -300,12 +300,12 @@ const getUserProfile = async (req, res) => {
 const createInvestmentPlan = async (req, res) => {
     const { name, minAmount, maxAmount, dailyProfitRate } = req.body;
 
+    // 1. Validação de pré-requisitos (Mantido do código original)
     if (!name || !minAmount || !maxAmount || !dailyProfitRate) {
         return res.status(400).json({ message: 'Por favor, forneça nome, valor mínimo, valor máximo e taxa de lucro diário.' });
     }
-    if (minAmount < 0 || maxAmount < 0 || dailyProfitRate < 0 || dailyProfitRate > 1) {
-        return res.status(400).json({ message: 'Valores inválidos para plano de investimento.' });
-    }
+    // NOTA: As validações de minAmount < 0, etc. serão tratadas como 'ValidationError' pelo Mongoose,
+    // mas a validação de minAmount > maxAmount precisa ser feita aqui antes do create.
     if (minAmount > maxAmount) {
         return res.status(400).json({ message: 'Valor mínimo não pode ser maior que o valor máximo.' });
     }
@@ -321,10 +321,21 @@ const createInvestmentPlan = async (req, res) => {
         logAdminAction(req.user._id, `Plano de investimento criado: ${name}`, { planId: plan._id });
         res.status(201).json({ success: true, plan });
     } catch (error) {
-        if (error.code === 11000) {
+        if (error.code === 11000) { // Erro de duplicidade (unique: true)
             return res.status(400).json({ message: 'Já existe um plano com este nome.' });
         }
-        logError(`Erro ao criar plano de investimento: ${error.message}`, { stack: error.stack, adminId: req.user._id });
+        
+        // --- TRATAMENTO DE ERROS DE VALIDAÇÃO DO MONGOOSE (CORREÇÃO CRÍTICA) ---
+        if (error.name === 'ValidationError') {
+            // Extrai todas as mensagens de erro de validação do Mongoose e as une
+            const messages = Object.values(error.errors).map(val => val.message);
+            logError(`Erro de validação ao criar plano: ${messages.join('; ')}`, { stack: error.stack, adminId: req.user._id });
+            return res.status(400).json({ message: messages.join('; ') });
+        }
+        // --- FIM DA CORREÇÃO ---
+
+        logError(`Erro inesperado ao criar plano de investimento: ${error.message}`, { stack: error.stack, adminId: req.user._id });
+        // Se não for um erro de validação ou duplicidade, retorna 500 genérico
         res.status(500).json({ message: 'Erro ao criar plano de investimento.' });
     }
 };
@@ -382,13 +393,11 @@ const updateInvestmentPlan = async (req, res) => {
             return res.status(404).json({ message: 'Plano de investimento não encontrado.' });
         }
 
-        // Validações
-        if (minAmount !== undefined && minAmount < 0) return res.status(400).json({ message: 'Valor mínimo inválido.' });
-        if (maxAmount !== undefined && maxAmount < 0) return res.status(400).json({ message: 'Valor máximo inválido.' });
-        if (dailyProfitRate !== undefined && (dailyProfitRate < 0 || dailyProfitRate > 1)) return res.status(400).json({ message: 'Taxa de lucro diário inválida.' });
+        // Validações de pré-requisitos
         if (minAmount !== undefined && maxAmount !== undefined && minAmount > maxAmount) {
             return res.status(400).json({ message: 'Valor mínimo não pode ser maior que o valor máximo.' });
         }
+        // As validações restantes (como min > 0, rate > 0 e < 1) serão tratadas pelo Mongoose no .save()
 
         plan.name = name !== undefined ? name : plan.name;
         plan.minAmount = minAmount !== undefined ? minAmount : plan.minAmount;
@@ -404,6 +413,14 @@ const updateInvestmentPlan = async (req, res) => {
         if (error.code === 11000) {
             return res.status(400).json({ message: 'Já existe um plano com este nome.' });
         }
+        
+        // TRATAMENTO DE ERROS DE VALIDAÇÃO DO MONGOOSE
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(val => val.message);
+            logError(`Erro de validação ao atualizar plano: ${messages.join('; ')}`, { stack: error.stack, adminId: req.user._id });
+            return res.status(400).json({ message: messages.join('; ') });
+        }
+
         logError(`Erro ao atualizar plano de investimento: ${error.message}`, { stack: error.stack, adminId: req.user._id, planId: req.params.id });
         res.status(500).json({ message: 'Erro ao atualizar plano de investimento.' });
     }
@@ -421,14 +438,14 @@ const deleteInvestmentPlan = async (req, res) => {
             return res.status(404).json({ message: 'Plano de investimento não encontrado.' });
         }
 
-        // TODO: Adicionar lógica para verificar se há investimentos ativos com este plano.
-        // Se houver, talvez desativar em vez de deletar ou exigir que não haja investimentos ativos.
+        // Adicionar lógica para verificar se há investimentos ativos com este plano.
         const activeInvestmentsUsingPlan = await Investment.countDocuments({ planId: plan._id, status: 'active' });
         if (activeInvestmentsUsingPlan > 0) {
             return res.status(400).json({ message: 'Não é possível deletar um plano com investimentos ativos. Desative-o primeiro.' });
         }
 
-        await plan.deleteOne();
+        // Usar findByIdAndDelete para garantir que os hooks pre/post não sejam acionados incorretamente se não houver um hook deleteOne
+        await InvestmentPlan.findByIdAndDelete(req.params.id);
 
         logAdminAction(req.user._id, `Plano de investimento deletado: ${plan.name}`, { planId: plan._id });
         res.status(200).json({ success: true, message: 'Plano de investimento removido.' });
@@ -471,6 +488,15 @@ const activateInvestment = async (req, res) => {
         if (user.balance < amount) {
             return res.status(400).json({ message: 'Saldo insuficiente para este investimento.' });
         }
+        
+        // Bloqueia a ativação se o usuário já tiver um investimento ativo (opcional, dependendo das regras de negócio)
+        if (user.activeInvestments && user.activeInvestments.length > 0) {
+             // NOTA: Esta checagem é importante para evitar que o usuário acumule muitos planos
+             // sem dar tempo do CRON rodar e o lucro ser creditado de forma correta.
+             // Se você deseja permitir múltiplos investimentos, remova o bloco abaixo.
+             // return res.status(400).json({ message: 'Você já possui um investimento ativo. Por favor, aguarde a conclusão ou a lógica de múltiplos investimentos.' });
+        }
+
 
         // Deduzir o valor do saldo do usuário
         user.balance -= amount;
@@ -920,6 +946,18 @@ const updateAdminConfig = async (req, res) => {
             logInfo('AdminConfig criada durante tentativa de atualização, pois não existia.');
         }
 
+        // Validações básicas antes de salvar (para evitar ValidationError no Mongoose)
+        if (minDepositAmount !== undefined && minDepositAmount < 1) {
+             return res.status(400).json({ message: 'Valor mínimo de depósito deve ser 1 ou mais.' });
+        }
+        if (commissionOnPlanActivation !== undefined && (commissionOnPlanActivation < 0 || commissionOnPlanActivation > 1)) {
+             return res.status(400).json({ message: 'Comissão de ativação deve ser entre 0 e 1.' });
+        }
+        if (commissionOnDailyProfit !== undefined && (commissionOnDailyProfit < 0 || commissionOnDailyProfit > 1)) {
+             return res.status(400).json({ message: 'Comissão de lucro diário deve ser entre 0 e 1.' });
+        }
+
+
         // Configurações de Promoção
         config.isPromotionActive = isPromotionActive !== undefined ? isPromotionActive : config.isPromotionActive;
         config.referralBonusAmount = referralBonusAmount !== undefined ? referralBonusAmount : config.referralBonusAmount;
@@ -940,6 +978,13 @@ const updateAdminConfig = async (req, res) => {
         logAdminAction(req.user._id, `Configurações administrativas atualizadas.`, { configId: config._id, updatedFields: req.body });
         res.status(200).json({ success: true, message: 'Configurações administrativas atualizadas com sucesso.', config });
     } catch (error) {
+        // TRATAMENTO DE ERROS DE VALIDAÇÃO DO MONGOOSE
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(val => val.message);
+            logError(`Erro de validação ao atualizar config: ${messages.join('; ')}`, { stack: error.stack, adminId: req.user._id });
+            return res.status(400).json({ message: messages.join('; ') });
+        }
+
         logError(`Erro ao atualizar configurações de promoção: ${error.message}`, { stack: error.stack, adminId: req.user._id });
         res.status(500).json({ message: 'Erro ao atualizar configurações de promoção.' });
     }
@@ -1172,9 +1217,13 @@ const processDailyProfitsAndCommissions = async (req, res) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0); // Considerar o início do dia para cálculo
 
+        // CORREÇÃO: Busca investimentos que ainda não foram creditados HOJE (lt: today)
         const investments = await Investment.find({
             status: 'active',
-            lastProfitCreditDate: { $lt: today }, // Apenas investimentos que não tiveram lucro creditado hoje
+            $or: [
+                { lastProfitCreditDate: { $lt: today } }, // Crédito foi antes de hoje
+                { lastProfitCreditDate: { $exists: false } } // Nunca foi creditado
+            ]
         }).populate('userId'); // Popula o usuário para atualizar o saldo e verificar convidante
 
         const adminConfig = await AdminConfig.findOne(); // Para comissões
@@ -1186,15 +1235,35 @@ const processDailyProfitsAndCommissions = async (req, res) => {
 
             if (!user || user.status === 'blocked') {
                 logInfo(`Ignorando investimento ${investment._id} porque o usuário está bloqueado ou não existe.`, { investmentId: investment._id, userId: user ? user._id : 'N/A' });
+                // Se o investimento deveria ter sido encerrado, encerra agora
+                if (investment.endDate <= today) {
+                    investment.status = 'completed';
+                    // NÃO remove da lista do usuário se ele não existir
+                    await investment.save();
+                }
                 continue;
             }
 
-            // 1. Calcular e creditar lucro diário
+            // 1. Verificar e encerrar investimento se a duração for atingida (antes de creditar o lucro de hoje)
+            if (investment.endDate <= today) {
+                investment.status = 'completed';
+                await investment.save();
+
+                // Remover o investimento da lista de ativos do usuário
+                user.activeInvestments = user.activeInvestments.filter(id => id.toString() !== investment._id.toString());
+                await user.save();
+
+                logInfo(`Investimento ${investment._id} do usuário ${user.phoneNumber} completado e encerrado.`, { userId: user._id, investmentId: investment._id });
+                continue; // Não credita lucro se foi encerrado antes do crédito de hoje
+            }
+
+
+            // 2. Calcular e creditar lucro diário
             const dailyProfit = investment.investedAmount * investment.dailyProfitRate;
             investment.currentProfit += dailyProfit;
             user.balance += dailyProfit; // Credita no saldo principal
 
-            // 2. Lógica de Comissão sobre Renda Diária para o convidante
+            // 3. Lógica de Comissão sobre Renda Diária para o convidante
             if (adminConfig && adminConfig.isPromotionActive && adminConfig.commissionOnDailyProfit > 0 && user.invitedBy) {
                 const inviter = await User.findOne({ referralCode: user.invitedBy });
 
@@ -1212,25 +1281,15 @@ const processDailyProfitsAndCommissions = async (req, res) => {
             await user.save(); // Salva as atualizações no usuário
 
             logInfo(`Lucro diário de ${dailyProfit} MT creditado para o investimento ${investment._id} do usuário ${user.phoneNumber}. Novo saldo: ${user.balance}.`, { userId: user._id, investmentId: investment._id });
-
-            // 3. Verificar e encerrar investimento se a duração for atingida
-            if (investment.endDate <= today) {
-                investment.status = 'completed';
-                await investment.save();
-
-                // Remover o investimento da lista de ativos do usuário
-                user.activeInvestments = user.activeInvestments.filter(id => id.toString() !== investment._id.toString());
-                await user.save();
-
-                logInfo(`Investimento ${investment._id} do usuário ${user.phoneNumber} completado.`, { userId: user._id, investmentId: investment._id });
-            }
         }
+
 
         // 4. Lógica para bônus fixo por número de referidos (ex: convidar 10 investidores -> X MT)
         if (adminConfig && adminConfig.isPromotionActive && adminConfig.referralBonusAmount > 0 && adminConfig.referralRequiredInvestedCount > 0) {
+            // Busca usuários que ainda não receberam o bônus fixo
             const usersToCheckForReferralBonus = await User.find({
                 'referredUsers.0': { '$exists': true }, // Pelo menos um referido
-                // Simplificação: Assumimos que a lógica de bônus está correta.
+                hasReceivedReferralBonus: false // Assume a existência de um campo no User Schema
             }).populate('referredUsers');
 
             for (const user of usersToCheckForReferralBonus) {
@@ -1240,10 +1299,14 @@ const processDailyProfitsAndCommissions = async (req, res) => {
                     activeInvestments: { $exists: true, $not: { $size: 0 } } // Tem pelo menos 1 investimento ativo ou já teve
                 });
 
-                // A lógica de checagem do bônus fixo é removida daqui e deve ser refeita em um endpoint Admin
-                // ou em uma lógica mais robusta de CRON, pois é muito propensa a erros de dupla creditação.
-                // Mantemos o comentário para a sua referência, mas o código de CRON não deve ser complexo.
+                if (investedReferralsCount >= adminConfig.referralRequiredInvestedCount) {
+                    // Credita o bônus
+                    user.bonusBalance += adminConfig.referralBonusAmount;
+                    user.hasReceivedReferralBonus = true; // Marca como recebido
+                    await user.save();
 
+                    logInfo(`Bônus fixo de indicação (${adminConfig.referralBonusAmount} MT) creditado para ${user.phoneNumber}.`, { userId: user._id, bonusAmount: adminConfig.referralBonusAmount });
+                }
             }
         }
 
