@@ -35,7 +35,7 @@ const {
     changeUserPasswordByAdmin,
     getBlockedUsers,
     processDailyProfitsAndCommissions,
-    getDepositConfig, // NOVO: Controlador para obter configurações de depósito
+    getDepositConfig, // Controlador para obter configurações de depósito M-Pesa/Emola
 } = require('./controllers'); // Importa todos os controladores
 const { protect, authorizeAdmin } = require('./middleware'); // Importa os middlewares de segurança
 
@@ -53,7 +53,7 @@ const appRoutes = (app) => {
     router.get('/profile', protect, getUserProfile); // Perfil do usuário logado
 
     // --- Rotas de Configuração Pública (Novo para o Checkout) ---
-    router.get('/deposit-config', getDepositConfig); // NOVO ENDPOINT: Configs de depósito M-Pesa/Emola
+    router.get('/deposit-config', getDepositConfig); // Configs de depósito M-Pesa/Emola
 
     // --- Rotas de Planos de Investimento (Públicas para leitura, Admin para CRUD) ---
     router.get('/investmentplans', getInvestmentPlans); // Todos podem ver os planos
@@ -90,20 +90,23 @@ const appRoutes = (app) => {
     router.put('/admin/withdrawals/:id/reject', protect, authorizeAdmin, rejectWithdrawal);
 
     // Gerenciamento de Usuários
-    router.get('/admin/users', protect, authorizeAdmin, getAllUsers);
-    router.get('/admin/users/:id', protect, authorizeAdmin, getUserDetails);
+    router.get('/admin/users', protect, authorizeAdmin, getAllUsers); // LISTAR TODOS
+
+    // CRÍTICO: Rota fixa '/blocked' DEVE vir antes de rotas dinâmicas como '/:id'
+    router.get('/admin/users/blocked', protect, authorizeAdmin, getBlockedUsers); // LISTAR BLOQUEADOS
+    
+    router.get('/admin/users/:id', protect, authorizeAdmin, getUserDetails); // DETALHES DE UM ÚNICO USUÁRIO
+    
     router.put('/admin/users/:id/block', protect, authorizeAdmin, blockUser);
     router.put('/admin/users/:id/unblock', protect, authorizeAdmin, unblockUser);
     router.post('/admin/users/create-admin', protect, authorizeAdmin, createAdmin); // Criar novos admins
     router.put('/admin/users/:id/change-password', protect, authorizeAdmin, changeUserPasswordByAdmin);
-    router.get('/admin/users/blocked', protect, authorizeAdmin, getBlockedUsers); // Listar contas bloqueadas
 
     // Gerenciamento de Configurações Administrativas / Promoções
     router.get('/admin/config', protect, authorizeAdmin, getAdminConfig);
     router.put('/admin/config', protect, authorizeAdmin, updateAdminConfig);
 
     // --- Rota Interna para Tarefas Agendadas (CRON) ---
-    // ATENÇÃO: Esta rota deve ser rigorosamente protegida em produção.
     router.post('/internal/process-daily-profits', protect, authorizeAdmin, processDailyProfitsAndCommissions);
 
 
