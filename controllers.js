@@ -937,7 +937,11 @@ const updateAdminConfig = async (req, res) => {
  */
 const getAllUsers = async (req, res) => {
     try {
-        const users = await User.find({}).select('-password').sort({ createdAt: -1 });
+        // CORREÇÃO FINAL: Seleciona explicitamente os campos que o frontend precisa e exclui a senha
+        const users = await User.find({})
+                                .select('_id phoneNumber status isAdmin referralCode invitedBy createdAt')
+                                .sort({ createdAt: -1 });
+
         res.status(200).json({ success: true, users });
     } catch (error) {
         logError(`Erro ao obter todos os usuários: ${error.message}`, { stack: error.stack, adminId: req.user._id });
@@ -1098,8 +1102,12 @@ const changeUserPasswordByAdmin = async (req, res) => {
  */
 const getBlockedUsers = async (req, res) => {
     try {
-        // CORREÇÃO: Garante que os campos retornados são válidos e exclui a senha
-        const blockedUsers = await User.find({ status: 'blocked' }).select('-password -lastLoginIp -lastLoginAt');
+        // CORREÇÃO FINAL: Seleciona explicitamente os campos que o frontend precisa e exclui a senha
+        // A exclusão de campos como -lastLoginIp ou -lastLoginAt é removida para máxima compatibilidade.
+        const blockedUsers = await User.find({ status: 'blocked' })
+                                        .select('_id phoneNumber status referralCode invitedBy createdAt') // Campos essenciais
+                                        .sort({ createdAt: -1 });
+
         res.status(200).json({ success: true, users: blockedUsers });
     } catch (error) {
         logError(`Erro ao obter contas bloqueadas: ${error.message}`, { stack: error.stack, adminId: req.user._id });
