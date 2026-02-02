@@ -74,12 +74,10 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Withdrawal',
     }],
-    // --- NOVO CAMPO: Para rastrear se o bônus fixo de indicação já foi creditado ---
     hasReceivedReferralBonus: { 
         type: Boolean,
         default: false,
     },
-    // --- FIM NOVO CAMPO ---
     lastLoginIp: String, // Para fins informativos/logs
     lastLoginAt: Date,
     createdAt: {
@@ -128,8 +126,8 @@ const investmentPlanSchema = new mongoose.Schema({
     maxAmount: {
         type: Number,
         required: [true, 'Valor máximo é obrigatório.'],
-        min: function() { return this.minAmount; }, // Max deve ser maior ou igual ao Min
-        message: 'Valor máximo deve ser maior ou igual ao valor mínimo.'
+        // CORREÇÃO CRÍTICA: A validação de min <= max foi movida para o controller.
+        min: [0, 'Valor máximo não pode ser negativo.'], 
     },
     dailyProfitRate: { // Ex: 0.02 para 2% ao dia
         type: Number,
