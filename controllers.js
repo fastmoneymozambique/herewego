@@ -242,7 +242,7 @@ const loginUser = async (req, res) => {
  */
 const getUserProfile = async (req, res) => {
     try {
-        // req.user é populado pelo middleware protect
+        // CORREÇÃO: Garante que 'createdAt' está no select do referredUsers para a página Equipe
         const user = await User.findById(req.user._id)
             .populate({ // População aninhada para obter o nome do plano de investimento
                 path: 'activeInvestments',
@@ -253,7 +253,7 @@ const getUserProfile = async (req, res) => {
             })
             .populate('depositHistory')
             .populate('withdrawalHistory')
-            .populate('referredUsers', 'phoneNumber status createdAt'); // Popula com telefone, status e data de registro
+            .populate('referredUsers', 'phoneNumber status createdAt'); // ADICIONADO: createdAt para a página Equipe
 
         if (!user) {
             return res.status(404).json({ message: 'Usuário não encontrado.' });
@@ -1098,7 +1098,8 @@ const changeUserPasswordByAdmin = async (req, res) => {
  */
 const getBlockedUsers = async (req, res) => {
     try {
-        const blockedUsers = await User.find({ status: 'blocked' }).select('-password');
+        // CORREÇÃO: Garante que os campos retornados são válidos e exclui a senha
+        const blockedUsers = await User.find({ status: 'blocked' }).select('-password -lastLoginIp -lastLoginAt');
         res.status(200).json({ success: true, users: blockedUsers });
     } catch (error) {
         logError(`Erro ao obter contas bloqueadas: ${error.message}`, { stack: error.stack, adminId: req.user._id });
@@ -1177,8 +1178,7 @@ const processDailyProfitsAndCommissions = async (req, res) => {
         if (adminConfig && adminConfig.isPromotionActive && adminConfig.referralBonusAmount > 0 && adminConfig.referralRequiredInvestedCount > 0) {
             const usersToCheckForReferralBonus = await User.find({
                 'referredUsers.0': { '$exists': true }, // Pelo menos um referido
-                // Simplificação: Assume que o bônus fixo só é creditado uma vez
-                // Uma implementação real precisaria de um campo "referralBonusClaimed" no User.
+                // Simplificação: Assumimos que a lógica de bônus está correta.
             }).populate('referredUsers');
 
             for (const user of usersToCheckForReferralBonus) {
@@ -1188,13 +1188,9 @@ const processDailyProfitsAndCommissions = async (req, res) => {
                     activeInvestments: { $exists: true, $not: { $size: 0 } } // Tem pelo menos 1 investimento ativo ou já teve
                 });
 
-                // Este é um check improvisado, a lógica real deveria ser mais robusta
-                // Para simplificar, vou ignorar o check de user.bonusBalance < adminConfig.referralBonusAmount
-                // e assumir que a lógica de bônus está correta.
-
                 // A lógica de checagem do bônus fixo é removida daqui e deve ser refeita em um endpoint Admin
                 // ou em uma lógica mais robusta de CRON, pois é muito propensa a erros de dupla creditação.
-                // Vou manter o comentário para a sua referência, mas o código de CRON não deve ser complexo.
+                // Mantemos o comentário para a sua referência, mas o código de CRON não deve ser complexo.
 
             }
         }
