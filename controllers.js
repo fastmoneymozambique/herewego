@@ -322,6 +322,7 @@ const createInvestmentPlan = async (req, res) => {
     }
 };
 
+
 /**
  * @desc    Obter todos os planos de investimento
  * @route   GET /api/investmentplans
@@ -329,13 +330,19 @@ const createInvestmentPlan = async (req, res) => {
  */
 const getInvestmentPlans = async (req, res) => {
     try {
-        const plans = await InvestmentPlan.find({ isActive: true }).sort({ minAmount: 1 });
+        // Se a requisição veio de um usuário autenticado E for admin, 
+        // ele verá todos os planos (ativos e inativos).
+        // Se for anônimo (req.user é undefined), ou usuário normal, verá apenas os ativos.
+        const filter = (req.user && req.user.isAdmin) ? {} : { isActive: true };
+        
+        const plans = await InvestmentPlan.find(filter).sort({ minAmount: 1 });
         res.status(200).json({ success: true, plans });
     } catch (error) {
         logError(`Erro ao obter planos de investimento: ${error.message}`, { stack: error.stack });
         res.status(500).json({ message: 'Erro ao obter planos de investimento.' });
     }
 };
+
 
 /**
  * @desc    Obter um plano de investimento por ID

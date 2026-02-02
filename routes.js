@@ -1,3 +1,5 @@
+--- START OF FILE routes.js ---
+
 // routes.js
 // Este arquivo define todas as rotas da API e as associa aos controladores correspondentes,
 // aplicando middlewares de autenticação e autorização quando necessário.
@@ -8,7 +10,7 @@ const {
     loginUser,
     getUserProfile,
     createInvestmentPlan,
-    getInvestmentPlans,
+    getInvestmentPlans, // AGORA INTELIGENTE: Retorna todos se for admin
     getInvestmentPlanById,
     updateInvestmentPlan,
     deleteInvestmentPlan,
@@ -56,7 +58,7 @@ const appRoutes = (app) => {
     router.get('/deposit-config', getDepositConfig); // Configs de depósito M-Pesa/Emola
 
     // --- Rotas de Planos de Investimento (Públicas para leitura, Admin para CRUD) ---
-    router.get('/investmentplans', getInvestmentPlans); // Todos podem ver os planos
+    router.get('/investmentplans', getInvestmentPlans); // Todos podem ver os planos (Ativos)
     router.get('/investmentplans/:id', getInvestmentPlanById); // Todos podem ver um plano específico
 
     // --- Rotas de Investimento do Usuário ---
@@ -75,6 +77,9 @@ const appRoutes = (app) => {
     // --- Rotas do Painel Administrativo (Exigem autenticação e autorização de Admin) ---
 
     // Gerenciamento de Planos de Investimento
+    // NOVO: Usamos a rota investmentplans com o middleware protect para que o controller
+    // saiba que é um admin e retorne TODOS os planos.
+    router.get('/admin/investmentplans', protect, authorizeAdmin, getInvestmentPlans); 
     router.post('/admin/investmentplans', protect, authorizeAdmin, createInvestmentPlan);
     router.put('/admin/investmentplans/:id', protect, authorizeAdmin, updateInvestmentPlan);
     router.delete('/admin/investmentplans/:id', protect, authorizeAdmin, deleteInvestmentPlan);
