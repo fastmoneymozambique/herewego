@@ -1,5 +1,3 @@
---- START OF FILE routes.js ---
-
 // routes.js
 // Este arquivo define todas as rotas da API e as associa aos controladores correspondentes,
 // aplicando middlewares de autenticação e autorização quando necessário.
