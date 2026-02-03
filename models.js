@@ -126,7 +126,6 @@ const investmentPlanSchema = new mongoose.Schema({
     maxAmount: {
         type: Number,
         required: [true, 'Valor máximo é obrigatório.'],
-        // CORREÇÃO CRÍTICA: A validação de min <= max foi movida para o controller.
         min: [0, 'Valor máximo não pode ser negativo.'], 
     },
     dailyProfitRate: { // Ex: 0.02 para 2% ao dia
@@ -144,6 +143,12 @@ const investmentPlanSchema = new mongoose.Schema({
         type: Boolean,
         default: true,
     },
+    // --- NOVO CAMPO PARA IMAGEM ---
+    imageUrl: {
+        type: String,
+        default: 'https://res.cloudinary.com/default-image-url', // URL padrão ou placeholder
+    },
+    // --- FIM NOVO CAMPO ---
     createdAt: {
         type: Date,
         default: Date.now,

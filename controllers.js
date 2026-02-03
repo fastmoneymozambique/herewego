@@ -298,24 +298,24 @@ const getUserProfile = async (req, res) => {
  * @access  Private (Admin)
  */
 const createInvestmentPlan = async (req, res) => {
-    const { name, minAmount, maxAmount, dailyProfitRate } = req.body;
+    // maxAmount é mantido no modelo, mas a lógica de preço único usa apenas minAmount como valor fixo.
+    const { name, minAmount, dailyProfitRate, imageUrl } = req.body;
 
-    // 1. Validação de pré-requisitos (Mantido do código original)
-    if (!name || !minAmount || !maxAmount || !dailyProfitRate) {
-        return res.status(400).json({ message: 'Por favor, forneça nome, valor mínimo, valor máximo e taxa de lucro diário.' });
+    // 1. Validação de pré-requisitos
+    if (!name || !minAmount || !dailyProfitRate) {
+        return res.status(400).json({ message: 'Por favor, forneça nome, valor mínimo e taxa de lucro diário.' });
     }
-    // NOTA: As validações de minAmount < 0, etc. serão tratadas como 'ValidationError' pelo Mongoose,
-    // mas a validação de minAmount > maxAmount precisa ser feita aqui antes do create.
-    if (minAmount > maxAmount) {
-        return res.status(400).json({ message: 'Valor mínimo não pode ser maior que o valor máximo.' });
-    }
+    
+    // 2. Regra de preço único: maxAmount deve ser igual a minAmount
+    const maxAmount = minAmount; 
 
     try {
         const plan = await InvestmentPlan.create({
             name,
             minAmount,
-            maxAmount,
+            maxAmount, // Define maxAmount como igual a minAmount
             dailyProfitRate,
+            imageUrl: imageUrl || 'https://res.cloudinary.com/default-image-url', // Usa a URL da imagem ou a URL padrão
         });
 
         logAdminAction(req.user._id, `Plano de investimento criado: ${name}`, { planId: plan._id });
@@ -325,17 +325,14 @@ const createInvestmentPlan = async (req, res) => {
             return res.status(400).json({ message: 'Já existe um plano com este nome.' });
         }
         
-        // --- TRATAMENTO DE ERROS DE VALIDAÇÃO DO MONGOOSE (CORREÇÃO CRÍTICA) ---
+        // TRATAMENTO DE ERROS DE VALIDAÇÃO DO MONGOOSE
         if (error.name === 'ValidationError') {
-            // Extrai todas as mensagens de erro de validação do Mongoose e as une
             const messages = Object.values(error.errors).map(val => val.message);
             logError(`Erro de validação ao criar plano: ${messages.join('; ')}`, { stack: error.stack, adminId: req.user._id });
             return res.status(400).json({ message: messages.join('; ') });
         }
-        // --- FIM DA CORREÇÃO ---
 
         logError(`Erro inesperado ao criar plano de investimento: ${error.message}`, { stack: error.stack, adminId: req.user._id });
-        // Se não for um erro de validação ou duplicidade, retorna 500 genérico
         res.status(500).json({ message: 'Erro ao criar plano de investimento.' });
     }
 };
@@ -348,12 +345,10 @@ const createInvestmentPlan = async (req, res) => {
  */
 const getInvestmentPlans = async (req, res) => {
     try {
-        // Se a requisição veio de um usuário autenticado E for admin, 
-        // ele verá todos os planos (ativos e inativos).
-        // Se for anônimo (req.user é undefined), ou usuário normal, verá apenas os ativos.
         const filter = (req.user && req.user.isAdmin) ? {} : { isActive: true };
         
-        const plans = await InvestmentPlan.find(filter).sort({ minAmount: 1 });
+        // Certifique-se de selecionar imageUrl
+        const plans = await InvestmentPlan.find(filter).select('name minAmount maxAmount dailyProfitRate durationDays isActive imageUrl').sort({ minAmount: 1 });
         res.status(200).json({ success: true, plans });
     } catch (error) {
         logError(`Erro ao obter planos de investimento: ${error.message}`, { stack: error.stack });
@@ -385,7 +380,7 @@ const getInvestmentPlanById = async (req, res) => {
  * @access  Private (Admin)
  */
 const updateInvestmentPlan = async (req, res) => {
-    const { name, minAmount, maxAmount, dailyProfitRate, isActive } = req.body;
+    const { name, minAmount, dailyProfitRate, isActive, imageUrl } = req.body;
 
     try {
         let plan = await InvestmentPlan.findById(req.params.id);
@@ -393,17 +388,19 @@ const updateInvestmentPlan = async (req, res) => {
             return res.status(404).json({ message: 'Plano de investimento não encontrado.' });
         }
 
-        // Validações de pré-requisitos
-        if (minAmount !== undefined && maxAmount !== undefined && minAmount > maxAmount) {
-            return res.status(400).json({ message: 'Valor mínimo não pode ser maior que o valor máximo.' });
-        }
-        // As validações restantes (como min > 0, rate > 0 e < 1) serão tratadas pelo Mongoose no .save()
+        // Regra de preço único: maxAmount deve ser igual a minAmount
+        const maxAmount = minAmount !== undefined ? minAmount : plan.minAmount; 
+        
+        // O valor minAmount é o valor de entrada (preço fixo)
+        const updatedMinAmount = minAmount !== undefined ? minAmount : plan.minAmount;
 
+        // Atualiza os campos
         plan.name = name !== undefined ? name : plan.name;
-        plan.minAmount = minAmount !== undefined ? minAmount : plan.minAmount;
-        plan.maxAmount = maxAmount !== undefined ? maxAmount : plan.maxAmount;
+        plan.minAmount = updatedMinAmount;
+        plan.maxAmount = maxAmount; // Forçado a ser igual ao minAmount
         plan.dailyProfitRate = dailyProfitRate !== undefined ? dailyProfitRate : plan.dailyProfitRate;
         plan.isActive = isActive !== undefined ? isActive : plan.isActive;
+        plan.imageUrl = imageUrl !== undefined ? imageUrl : plan.imageUrl; // Adiciona imageUrl
 
         await plan.save();
 
@@ -444,7 +441,7 @@ const deleteInvestmentPlan = async (req, res) => {
             return res.status(400).json({ message: 'Não é possível deletar um plano com investimentos ativos. Desative-o primeiro.' });
         }
 
-        // Usar findByIdAndDelete para garantir que os hooks pre/post não sejam acionados incorretamente se não houver um hook deleteOne
+        // Usar findByIdAndDelete
         await InvestmentPlan.findByIdAndDelete(req.params.id);
 
         logAdminAction(req.user._id, `Plano de investimento deletado: ${plan.name}`, { planId: plan._id });
@@ -463,16 +460,13 @@ const deleteInvestmentPlan = async (req, res) => {
  * @access  Private (User)
  */
 const activateInvestment = async (req, res) => {
-    const { planId, amount } = req.body;
+    const { planId } = req.body; // Remove 'amount' da desestruturação, pois será forçado
     const userId = req.user._id;
 
-    if (!planId || !amount) {
-        return res.status(400).json({ message: 'Por favor, forneça o ID do plano e o valor a investir.' });
+    if (!planId) {
+        return res.status(400).json({ message: 'Por favor, forneça o ID do plano.' });
     }
-    if (amount <= 0) {
-        return res.status(400).json({ message: 'O valor do investimento deve ser positivo.' });
-    }
-
+    
     try {
         const user = await User.findById(userId);
         const plan = await InvestmentPlan.findById(planId);
@@ -480,20 +474,21 @@ const activateInvestment = async (req, res) => {
         if (!user || !plan || !plan.isActive) {
             return res.status(404).json({ message: 'Usuário ou plano de investimento não encontrado/ativo.' });
         }
-
-        if (amount < plan.minAmount || amount > plan.maxAmount) {
-            return res.status(400).json({ message: `O valor do investimento deve estar entre ${plan.minAmount} e ${plan.maxAmount}.` });
+        
+        // --- REGRA DE PREÇO ÚNICO ---
+        // O valor investido é SEMPRE o minAmount do plano.
+        const amount = plan.minAmount; 
+        
+        if (amount <= 0) {
+             return res.status(400).json({ message: 'Valor de investimento inválido (zero ou negativo).' });
         }
-
+        
         if (user.balance < amount) {
             return res.status(400).json({ message: 'Saldo insuficiente para este investimento.' });
         }
-        
+
         // Bloqueia a ativação se o usuário já tiver um investimento ativo (opcional, dependendo das regras de negócio)
         if (user.activeInvestments && user.activeInvestments.length > 0) {
-             // NOTA: Esta checagem é importante para evitar que o usuário acumule muitos planos
-             // sem dar tempo do CRON rodar e o lucro ser creditado de forma correta.
-             // Se você deseja permitir múltiplos investimentos, remova o bloco abaixo.
              // return res.status(400).json({ message: 'Você já possui um investimento ativo. Por favor, aguarde a conclusão ou a lógica de múltiplos investimentos.' });
         }
 
@@ -509,7 +504,7 @@ const activateInvestment = async (req, res) => {
         const investment = await Investment.create({
             userId,
             planId,
-            investedAmount: amount,
+            investedAmount: amount, // Valor forçado
             dailyProfitRate: plan.dailyProfitRate,
             endDate: endDate,
         });
