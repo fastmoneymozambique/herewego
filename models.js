@@ -317,7 +317,7 @@ const adminConfigSchema = new mongoose.Schema({
         max: [1, 'Comissão de lucro diário não pode ser maior que 1 (100%).'],
     },
     
-    // --- Configurações de Depósito (NOVOS CAMPOS) ---
+    // --- Configurações de Depósito ---
     minDepositAmount: {
         type: Number,
         default: 50, // Mínimo de 50 MT
@@ -339,9 +339,8 @@ const adminConfigSchema = new mongoose.Schema({
         type: String,
         default: 'KKR EMOLA ADMIN', // Nome do beneficiário (ADMIN deve configurar)
     },
-    // --- FIM DOS NOVOS CAMPOS DE DEPÓSITO ---
 
-    // --- NOVO: Configurações de Saque (Horário) ---
+    // --- Configurações de Saque (Horário e Limites) ---
     withdrawalStartTime: {
         type: String,
         default: '08:00', // Ex: 'HH:MM'
@@ -357,6 +356,16 @@ const adminConfigSchema = new mongoose.Schema({
             validator: (v) => /^\d{2}:\d{2}$/.test(v),
             message: props => `${props.value} não é um formato de hora válido (HH:MM)!`
         }
+    },
+    minWithdrawalAmount: { // NOVO CAMPO
+        type: Number,
+        default: 1, 
+        min: [1, 'Valor mínimo de saque deve ser 1 ou mais.'],
+    },
+    maxWithdrawalAmount: { // NOVO CAMPO
+        type: Number,
+        default: 5000, 
+        min: [1, 'Valor máximo de saque deve ser 1 ou mais.'],
     },
     // --- FIM NOVO: Configurações de Saque ---
 

@@ -96,6 +96,8 @@ const createInitialAdmin = async () => {
     }
 };
 
+// --- User Controllers ---
+
 /**
  * @desc    Registrar um novo usuário
  * @route   POST /api/register
@@ -747,7 +749,6 @@ const isWithdrawalTimeAllowed = (startTime, endTime) => {
 
     // Converte a string HH:MM para minutos desde a meia-noite
     const parseTime = (timeStr) => {
-        // Tenta garantir que o parse de hora seja robusto
         const [hour, minute] = timeStr.split(':').map(Number);
         if (isNaN(hour) || isNaN(minute)) return -1; // Retorna -1 se o formato for inválido
         return hour * 60 + minute;
@@ -793,13 +794,26 @@ const requestWithdrawal = async (req, res) => {
             return res.status(404).json({ message: 'Usuário não encontrado.' });
         }
         
-        // --- VERIFICAÇÃO DE HORÁRIO DE SAQUE ---
+        // --- VALIDAÇÃO DE HORÁRIO DE SAQUE ---
         if (adminConfig && adminConfig.withdrawalStartTime && adminConfig.withdrawalEndTime) {
             if (!isWithdrawalTimeAllowed(adminConfig.withdrawalStartTime, adminConfig.withdrawalEndTime)) {
                 return res.status(400).json({ message: `A solicitação de saque só é permitida entre ${adminConfig.withdrawalStartTime} e ${adminConfig.withdrawalEndTime} (MZ Time).` });
             }
         }
-        // --- FIM VERIFICAÇÃO DE HORÁRIO DE SAQUE ---
+        // --- FIM VALIDAÇÃO DE HORÁRIO DE SAQUE ---
+
+        // --- VALIDAÇÃO DE LIMITE MÍNIMO E MÁXIMO DE SAQUE ---
+        const minWithdrawal = adminConfig ? adminConfig.minWithdrawalAmount : 1;
+        const maxWithdrawal = adminConfig ? adminConfig.maxWithdrawalAmount : Infinity;
+        
+        if (amount < minWithdrawal) {
+            return res.status(400).json({ message: `O saque mínimo permitido é ${minWithdrawal} MT.` });
+        }
+        if (amount > maxWithdrawal) {
+            return res.status(400).json({ message: `O saque máximo permitido é ${maxWithdrawal} MT.` });
+        }
+        // --- FIM VALIDAÇÃO DE LIMITE MÍNIMO E MÁXIMO DE SAQUE ---
+
 
         if (user.balance < amount) {
             return res.status(400).json({ message: 'Saldo insuficiente para este saque.' });
@@ -938,8 +952,8 @@ const rejectWithdrawal = async (req, res) => {
  */
 const getDepositConfig = async (req, res) => {
     try {
-        // Incluindo todos os campos necessários para o frontend, INCLUINDO os novos de horário
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit withdrawalStartTime withdrawalEndTime');
+        // Incluindo todos os campos necessários para o frontend, INCLUINDO os novos de horário e limites
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount');
         
         if (!config) {
             // Se não houver config, cria uma com valores padrão antes de retornar
@@ -963,8 +977,8 @@ const getDepositConfig = async (req, res) => {
  */
 const getAdminConfig = async (req, res) => {
     try {
-        // Incluindo todos os campos necessários para o Admin, INCLUINDO os novos de horário
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit withdrawalStartTime withdrawalEndTime');
+        // Incluindo todos os campos necessários para o Admin, INCLUINDO os novos de horário e limites
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount');
         
         if (!config) {
             // Se não houver config, crie uma com valores padrão
@@ -986,7 +1000,7 @@ const getAdminConfig = async (req, res) => {
  * @access  Private (Admin)
  */
 const updateAdminConfig = async (req, res) => {
-    const { isPromotionActive, referralBonusAmount, referralRequiredInvestedCount, commissionOnPlanActivation, commissionOnDailyProfit, minDepositAmount, mpesaDepositNumber, mpesaRecipientName, emolaDepositNumber, emolaRecipientName, withdrawalStartTime, withdrawalEndTime } = req.body;
+    const { isPromotionActive, referralBonusAmount, referralRequiredInvestedCount, commissionOnPlanActivation, commissionOnDailyProfit, minDepositAmount, mpesaDepositNumber, mpesaRecipientName, emolaDepositNumber, emolaRecipientName, withdrawalStartTime, withdrawalEndTime, minWithdrawalAmount, maxWithdrawalAmount } = req.body;
 
     try {
         let config = await AdminConfig.findOne(); // Busca a única instância
@@ -1005,6 +1019,18 @@ const updateAdminConfig = async (req, res) => {
         if (commissionOnDailyProfit !== undefined && (commissionOnDailyProfit < 0 || commissionOnDailyProfit > 1)) {
              return res.status(400).json({ message: 'Comissão de lucro diário deve ser entre 0 e 1.' });
         }
+        
+        // Validação de limite de saque
+        if (minWithdrawalAmount !== undefined && minWithdrawalAmount < 1) {
+             return res.status(400).json({ message: 'Valor mínimo de saque deve ser 1 ou mais.' });
+        }
+        if (maxWithdrawalAmount !== undefined && maxWithdrawalAmount < 1) {
+             return res.status(400).json({ message: 'Valor máximo de saque deve ser 1 ou mais.' });
+        }
+        if (minWithdrawalAmount !== undefined && maxWithdrawalAmount !== undefined && parseFloat(minWithdrawalAmount) > parseFloat(maxWithdrawalAmount)) {
+             return res.status(400).json({ message: 'Valor mínimo de saque não pode ser maior que o valor máximo de saque.' });
+        }
+        
         // Validação de formato de hora
         const timeRegex = /^\d{2}:\d{2}$/;
         if (withdrawalStartTime !== undefined && withdrawalStartTime.length > 0 && !timeRegex.test(withdrawalStartTime)) {
@@ -1032,6 +1058,8 @@ const updateAdminConfig = async (req, res) => {
         // Configurações de Saque 
         config.withdrawalStartTime = withdrawalStartTime !== undefined ? withdrawalStartTime : config.withdrawalStartTime;
         config.withdrawalEndTime = withdrawalEndTime !== undefined ? withdrawalEndTime : config.withdrawalEndTime;
+        config.minWithdrawalAmount = minWithdrawalAmount !== undefined ? minWithdrawalAmount : config.minWithdrawalAmount;
+        config.maxWithdrawalAmount = maxWithdrawalAmount !== undefined ? maxWithdrawalAmount : config.maxWithdrawalAmount;
 
 
         await config.save();
