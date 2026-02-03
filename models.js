@@ -339,7 +339,26 @@ const adminConfigSchema = new mongoose.Schema({
         type: String,
         default: 'KKR EMOLA ADMIN', // Nome do beneficiário (ADMIN deve configurar)
     },
-    // --- FIM DOS NOVOS CAMPOS ---
+    // --- FIM DOS NOVOS CAMPOS DE DEPÓSITO ---
+
+    // --- NOVO: Configurações de Saque (Horário) ---
+    withdrawalStartTime: {
+        type: String,
+        default: '08:00', // Ex: 'HH:MM'
+        validate: {
+            validator: (v) => /^\d{2}:\d{2}$/.test(v),
+            message: props => `${props.value} não é um formato de hora válido (HH:MM)!`
+        }
+    },
+    withdrawalEndTime: {
+        type: String,
+        default: '18:00', // Ex: 'HH:MM'
+        validate: {
+            validator: (v) => /^\d{2}:\d{2}$/.test(v),
+            message: props => `${props.value} não é um formato de hora válido (HH:MM)!`
+        }
+    },
+    // --- FIM NOVO: Configurações de Saque ---
 
     // Garante que só haverá um documento de configurações
     singletonId: {

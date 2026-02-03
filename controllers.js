@@ -96,9 +96,6 @@ const createInitialAdmin = async () => {
     }
 };
 
-
-// --- User Controllers ---
-
 /**
  * @desc    Registrar um novo usuário
  * @route   POST /api/register
@@ -293,13 +290,16 @@ const getUserProfile = async (req, res) => {
 // --- Investment Plan Controllers (Admin) ---
 
 /**
- * @desc    Criar novo plano de investimento
+ * @desc    Criar novo plano de investimento (Admin)
  * @route   POST /api/admin/investmentplans
  * @access  Private (Admin)
+ * @param   {string} req.uploadedImageUrl - URL da imagem no Cloudinary (do uploadMiddleware).
  */
 const createInvestmentPlan = async (req, res) => {
     // maxAmount é mantido no modelo, mas a lógica de preço único usa apenas minAmount como valor fixo.
-    const { name, minAmount, dailyProfitRate, imageUrl } = req.body;
+    const { name, minAmount, dailyProfitRate } = req.body;
+    // Pega a URL do middleware de upload (pode ser undefined se não foi feito upload)
+    const uploadedImageUrl = req.uploadedImageUrl; 
 
     // 1. Validação de pré-requisitos
     if (!name || !minAmount || !dailyProfitRate) {
@@ -315,10 +315,11 @@ const createInvestmentPlan = async (req, res) => {
             minAmount,
             maxAmount, // Define maxAmount como igual a minAmount
             dailyProfitRate,
-            imageUrl: imageUrl || 'https://res.cloudinary.com/default-image-url', // Usa a URL da imagem ou a URL padrão
+            // Prioriza a URL uploadedImageUrl
+            imageUrl: uploadedImageUrl || req.body.imageUrl || 'https://res.cloudinary.com/default-image-url', 
         });
 
-        logAdminAction(req.user._id, `Plano de investimento criado: ${name}`, { planId: plan._id });
+        logAdminAction(req.user._id, `Plano de investimento criado: ${name}`, { planId: plan._id, imageUrl: plan.imageUrl });
         res.status(201).json({ success: true, plan });
     } catch (error) {
         if (error.code === 11000) { // Erro de duplicidade (unique: true)
@@ -347,7 +348,7 @@ const getInvestmentPlans = async (req, res) => {
     try {
         const filter = (req.user && req.user.isAdmin) ? {} : { isActive: true };
         
-        // Certifique-se de selecionar imageUrl
+        // Seleciona imageUrl
         const plans = await InvestmentPlan.find(filter).select('name minAmount maxAmount dailyProfitRate durationDays isActive imageUrl').sort({ minAmount: 1 });
         res.status(200).json({ success: true, plans });
     } catch (error) {
@@ -378,8 +379,13 @@ const getInvestmentPlanById = async (req, res) => {
  * @desc    Atualizar um plano de investimento (Admin)
  * @route   PUT /api/admin/investmentplans/:id
  * @access  Private (Admin)
+ * @param   {string} req.uploadedImageUrl - URL da imagem no Cloudinary (do uploadMiddleware).
  */
 const updateInvestmentPlan = async (req, res) => {
+    // Pega o URL do upload. Se não houver upload, o valor será `undefined`.
+    const uploadedImageUrl = req.uploadedImageUrl; 
+    
+    // Pega os dados do body (mesmo que venham do formulário multipart/form-data)
     const { name, minAmount, dailyProfitRate, isActive, imageUrl } = req.body;
 
     try {
@@ -390,8 +396,6 @@ const updateInvestmentPlan = async (req, res) => {
 
         // Regra de preço único: maxAmount deve ser igual a minAmount
         const maxAmount = minAmount !== undefined ? minAmount : plan.minAmount; 
-        
-        // O valor minAmount é o valor de entrada (preço fixo)
         const updatedMinAmount = minAmount !== undefined ? minAmount : plan.minAmount;
 
         // Atualiza os campos
@@ -400,11 +404,20 @@ const updateInvestmentPlan = async (req, res) => {
         plan.maxAmount = maxAmount; // Forçado a ser igual ao minAmount
         plan.dailyProfitRate = dailyProfitRate !== undefined ? dailyProfitRate : plan.dailyProfitRate;
         plan.isActive = isActive !== undefined ? isActive : plan.isActive;
-        plan.imageUrl = imageUrl !== undefined ? imageUrl : plan.imageUrl; // Adiciona imageUrl
+        
+        // Se houver uma nova URL do upload, use-a.
+        // Se não houver upload, use a URL que veio do body (que deve ser a URL antiga)
+        if (uploadedImageUrl) {
+            plan.imageUrl = uploadedImageUrl;
+        } else if (imageUrl !== undefined) { 
+             // Se o admin editou o texto do campo URL diretamente (caso não tenha feito upload)
+             plan.imageUrl = imageUrl;
+        }
+
 
         await plan.save();
 
-        logAdminAction(req.user._id, `Plano de investimento atualizado: ${plan.name}`, { planId: plan._id });
+        logAdminAction(req.user._id, `Plano de investimento atualizado: ${plan.name}`, { planId: plan._id, newImageUrl: plan.imageUrl });
         res.status(200).json({ success: true, plan });
     } catch (error) {
         if (error.code === 11000) {
@@ -724,6 +737,38 @@ const rejectDeposit = async (req, res) => {
 // --- Withdrawal Controllers ---
 
 /**
+ * Funções auxiliares para verificação de horário de saque
+ */
+const isWithdrawalTimeAllowed = (startTime, endTime) => {
+    const now = new Date();
+    // A hora do servidor deve estar no fuso correto (Africa/Maputo no seu .env)
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+
+    // Converte a string HH:MM para minutos desde a meia-noite
+    const parseTime = (timeStr) => {
+        // Tenta garantir que o parse de hora seja robusto
+        const [hour, minute] = timeStr.split(':').map(Number);
+        if (isNaN(hour) || isNaN(minute)) return -1; // Retorna -1 se o formato for inválido
+        return hour * 60 + minute;
+    };
+
+    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+    const startTimeInMinutes = parseTime(startTime);
+    const endTimeInMinutes = parseTime(endTime);
+    
+    if (startTimeInMinutes === -1 || endTimeInMinutes === -1) {
+        logError('Formato de hora de saque inválido na AdminConfig. Permitindo o saque.', { startTime, endTime });
+        return true; // Se a config for inválida, permite por segurança
+    }
+
+
+    // Verifica se a hora atual está dentro do intervalo [startTime, endTime]
+    return currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes <= endTimeInMinutes;
+};
+
+
+/**
  * @desc    Usuário solicita um saque
  * @route   POST /api/withdrawals
  * @access  Private (User)
@@ -742,10 +787,19 @@ const requestWithdrawal = async (req, res) => {
 
     try {
         const user = await User.findById(userId);
+        const adminConfig = await AdminConfig.findOne();
 
         if (!user) {
             return res.status(404).json({ message: 'Usuário não encontrado.' });
         }
+        
+        // --- VERIFICAÇÃO DE HORÁRIO DE SAQUE ---
+        if (adminConfig && adminConfig.withdrawalStartTime && adminConfig.withdrawalEndTime) {
+            if (!isWithdrawalTimeAllowed(adminConfig.withdrawalStartTime, adminConfig.withdrawalEndTime)) {
+                return res.status(400).json({ message: `A solicitação de saque só é permitida entre ${adminConfig.withdrawalStartTime} e ${adminConfig.withdrawalEndTime} (MZ Time).` });
+            }
+        }
+        // --- FIM VERIFICAÇÃO DE HORÁRIO DE SAQUE ---
 
         if (user.balance < amount) {
             return res.status(400).json({ message: 'Saldo insuficiente para este saque.' });
@@ -884,8 +938,8 @@ const rejectWithdrawal = async (req, res) => {
  */
 const getDepositConfig = async (req, res) => {
     try {
-        // CORREÇÃO CRÍTICA: Incluindo todos os campos necessários para o frontend
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit');
+        // Incluindo todos os campos necessários para o frontend, INCLUINDO os novos de horário
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit withdrawalStartTime withdrawalEndTime');
         
         if (!config) {
             // Se não houver config, cria uma com valores padrão antes de retornar
@@ -909,8 +963,8 @@ const getDepositConfig = async (req, res) => {
  */
 const getAdminConfig = async (req, res) => {
     try {
-        // Usa o mesmo seletor que o getDepositConfig para consistência
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit');
+        // Incluindo todos os campos necessários para o Admin, INCLUINDO os novos de horário
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit withdrawalStartTime withdrawalEndTime');
         
         if (!config) {
             // Se não houver config, crie uma com valores padrão
@@ -932,7 +986,7 @@ const getAdminConfig = async (req, res) => {
  * @access  Private (Admin)
  */
 const updateAdminConfig = async (req, res) => {
-    const { isPromotionActive, referralBonusAmount, referralRequiredInvestedCount, commissionOnPlanActivation, commissionOnDailyProfit, minDepositAmount, mpesaDepositNumber, mpesaRecipientName, emolaDepositNumber, emolaRecipientName } = req.body;
+    const { isPromotionActive, referralBonusAmount, referralRequiredInvestedCount, commissionOnPlanActivation, commissionOnDailyProfit, minDepositAmount, mpesaDepositNumber, mpesaRecipientName, emolaDepositNumber, emolaRecipientName, withdrawalStartTime, withdrawalEndTime } = req.body;
 
     try {
         let config = await AdminConfig.findOne(); // Busca a única instância
@@ -951,6 +1005,14 @@ const updateAdminConfig = async (req, res) => {
         if (commissionOnDailyProfit !== undefined && (commissionOnDailyProfit < 0 || commissionOnDailyProfit > 1)) {
              return res.status(400).json({ message: 'Comissão de lucro diário deve ser entre 0 e 1.' });
         }
+        // Validação de formato de hora
+        const timeRegex = /^\d{2}:\d{2}$/;
+        if (withdrawalStartTime !== undefined && withdrawalStartTime.length > 0 && !timeRegex.test(withdrawalStartTime)) {
+            return res.status(400).json({ message: 'Hora de início de saque inválida. Use o formato HH:MM.' });
+        }
+        if (withdrawalEndTime !== undefined && withdrawalEndTime.length > 0 && !timeRegex.test(withdrawalEndTime)) {
+            return res.status(400).json({ message: 'Hora de fim de saque inválida. Use o formato HH:MM.' });
+        }
 
 
         // Configurações de Promoção
@@ -960,12 +1022,16 @@ const updateAdminConfig = async (req, res) => {
         config.commissionOnPlanActivation = commissionOnPlanActivation !== undefined ? commissionOnPlanActivation : config.commissionOnPlanActivation;
         config.commissionOnDailyProfit = commissionOnDailyProfit !== undefined ? commissionOnDailyProfit : config.commissionOnDailyProfit;
 
-        // Configurações de Depósito (Novas)
+        // Configurações de Depósito 
         config.minDepositAmount = minDepositAmount !== undefined ? minDepositAmount : config.minDepositAmount;
         config.mpesaDepositNumber = mpesaDepositNumber !== undefined ? mpesaDepositNumber : config.mpesaDepositNumber;
         config.mpesaRecipientName = mpesaRecipientName !== undefined ? mpesaRecipientName : config.mpesaRecipientName;
         config.emolaDepositNumber = emolaDepositNumber !== undefined ? emolaDepositNumber : config.emolaDepositNumber;
         config.emolaRecipientName = emolaRecipientName !== undefined ? emolaRecipientName : config.emolaRecipientName;
+        
+        // Configurações de Saque 
+        config.withdrawalStartTime = withdrawalStartTime !== undefined ? withdrawalStartTime : config.withdrawalStartTime;
+        config.withdrawalEndTime = withdrawalEndTime !== undefined ? withdrawalEndTime : config.withdrawalEndTime;
 
 
         await config.save();

@@ -38,6 +38,7 @@ const {
     getDepositConfig, // Controlador para obter configurações de depósito M-Pesa/Emola
 } = require('./controllers'); // Importa todos os controladores
 const { protect, authorizeAdmin } = require('./middleware'); // Importa os middlewares de segurança
+const { upload, uploadToCloudinary } = require('./uploadMiddleware'); // NOVO: Importa middlewares de upload
 
 const router = express.Router(); // Cria uma instância de router do Express
 
@@ -75,11 +76,24 @@ const appRoutes = (app) => {
     // --- Rotas do Painel Administrativo (Exigem autenticação e autorização de Admin) ---
 
     // Gerenciamento de Planos de Investimento
-    // NOVO: Usamos a rota investmentplans com o middleware protect para que o controller
-    // saiba que é um admin e retorne TODOS os planos.
     router.get('/admin/investmentplans', protect, authorizeAdmin, getInvestmentPlans); 
-    router.post('/admin/investmentplans', protect, authorizeAdmin, createInvestmentPlan);
-    router.put('/admin/investmentplans/:id', protect, authorizeAdmin, updateInvestmentPlan);
+    
+    // Rota de Criação com Upload de Imagem
+    router.post('/admin/investmentplans', 
+        protect, 
+        authorizeAdmin, 
+        upload.single('image'), // 1. Multer processa o campo 'image'
+        uploadToCloudinary, // 2. Envia para o Cloudinary e coloca a URL em req.uploadedImageUrl
+        createInvestmentPlan); // 3. Controller salva o plano com a nova URL
+    
+    // Rota de Atualização com Upload de Imagem
+    router.put('/admin/investmentplans/:id', 
+        protect, 
+        authorizeAdmin, 
+        upload.single('image'), // 1. Multer processa o campo 'image'
+        uploadToCloudinary, // 2. Envia para o Cloudinary
+        updateInvestmentPlan); // 3. Controller atualiza o plano com a nova URL
+        
     router.delete('/admin/investmentplans/:id', protect, authorizeAdmin, deleteInvestmentPlan);
 
     // Gerenciamento de Depósitos
