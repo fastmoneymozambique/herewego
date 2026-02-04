@@ -526,8 +526,8 @@ const activateInvestment = async (req, res) => {
         user.activeInvestments.push(investment._id);
         await user.save();
         
-        // 4. LÓGICA DE COMISSÃO POR ATIVAÇÃO (AGORA CRÉDITO NO SALDO PRINCIPAL)
-        if (user.invitedBy && adminConfig && adminConfig.isPromotionActive && adminConfig.commissionOnPlanActivation > 0) {
+        // 4. LÓGICA DE COMISSÃO POR ATIVAÇÃO (SEMPRE ATIVO, CRÉDITO NO SALDO PRINCIPAL)
+        if (user.invitedBy && adminConfig && adminConfig.commissionOnPlanActivation > 0) {
             // Busca o convidante (Inviter)
             const inviter = await User.findOne({ referralCode: user.invitedBy });
 
@@ -633,9 +633,9 @@ const upgradeInvestment = async (req, res) => {
 
         logInfo(`Upgrade de investimento realizado para ${user.phoneNumber} do plano ${currentPlan.name} (${currentAmount} MT) para ${newPlan.name} (${newAmount} MT). Diferença paga: ${priceDifference} MT.`, { userId, investmentId: activeInvestment._id, newPlanId: newPlan._id });
         
-        // 4. LÓGICA DE COMISSÃO POR ATIVAÇÃO NO UPGRADE (AGORA CRÉDITO NO SALDO PRINCIPAL)
+        // 4. LÓGICA DE COMISSÃO POR ATIVAÇÃO NO UPGRADE (SEMPRE ATIVO, CRÉDITO NO SALDO PRINCIPAL)
         const adminConfig = await AdminConfig.findOne();
-        if (user.invitedBy && adminConfig && adminConfig.isPromotionActive && adminConfig.commissionOnPlanActivation > 0) {
+        if (user.invitedBy && adminConfig && adminConfig.commissionOnPlanActivation > 0) {
              const inviter = await User.findOne({ referralCode: user.invitedBy });
 
              if (inviter) {
@@ -1066,7 +1066,7 @@ const rejectWithdrawal = async (req, res) => {
 const getDepositConfig = async (req, res) => {
     try {
         // Selecionando os campos relevantes (incluindo as configs de comissão)
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount isPromotionActive commissionOnPlanActivation commissionOnDailyProfit');
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount commissionOnPlanActivation commissionOnDailyProfit');
         
         if (!config) {
             // Se não houver config, cria uma com valores padrão antes de retornar
@@ -1075,7 +1075,11 @@ const getDepositConfig = async (req, res) => {
             return res.status(200).json({ success: true, config: newConfig });
         }
 
-        res.status(200).json({ success: true, config });
+        // Adicionando isPromotionActive = true (fixo) para compatibilidade com o frontend do invite
+        const configObject = config.toObject();
+        configObject.isPromotionActive = true; 
+
+        res.status(200).json({ success: true, config: configObject });
     } catch (error) {
         logError(`Erro ao obter configurações de depósito: ${error.message}`, { stack: error.stack });
         res.status(500).json({ message: 'Erro ao obter configurações de depósito.' });
@@ -1091,7 +1095,7 @@ const getDepositConfig = async (req, res) => {
 const getAdminConfig = async (req, res) => {
     try {
         // Selecionando os campos relevantes (comissão e pagamentos)
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount isPromotionActive commissionOnPlanActivation commissionOnDailyProfit');
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount commissionOnPlanActivation commissionOnDailyProfit');
         
         if (!config) {
             // Se não houver config, crie uma com valores padrão
@@ -1114,7 +1118,7 @@ const getAdminConfig = async (req, res) => {
  */
 const updateAdminConfig = async (req, res) => {
     // Campos de bônus e promoção
-    const { isPromotionActive, commissionOnPlanActivation, commissionOnDailyProfit, minDepositAmount, mpesaDepositNumber, mpesaRecipientName, emolaDepositNumber, emolaRecipientName, withdrawalStartTime, withdrawalEndTime, minWithdrawalAmount, maxWithdrawalAmount } = req.body;
+    const { commissionOnPlanActivation, commissionOnDailyProfit, minDepositAmount, mpesaDepositNumber, mpesaRecipientName, emolaDepositNumber, emolaRecipientName, withdrawalStartTime, withdrawalEndTime, minWithdrawalAmount, maxWithdrawalAmount } = req.body;
 
     try {
         let config = await AdminConfig.findOne(); // Busca a única instância
@@ -1149,10 +1153,8 @@ const updateAdminConfig = async (req, res) => {
 
 
         // Configurações de Comissão
-        config.isPromotionActive = isPromotionActive !== undefined ? isPromotionActive : config.isPromotionActive;
         config.commissionOnPlanActivation = commissionOnPlanActivation !== undefined ? commissionOnPlanActivation : config.commissionOnPlanActivation;
         config.commissionOnDailyProfit = commissionOnDailyProfit !== undefined ? commissionOnDailyProfit : config.commissionOnDailyProfit;
-        // Campos de bônus fixo removidos do front-end não são atualizados aqui
 
         // Configurações de Depósito 
         config.minDepositAmount = minDepositAmount !== undefined ? minDepositAmount : config.minDepositAmount;
@@ -1398,7 +1400,7 @@ const getAdminLogs = async (req, res) => {
 };
 
 
-// --- Funções de CRON / Tarefas Agendadas (Final - Saldo Único, Sem Bônus Fixo) ---
+// --- Funções de CRON / Tarefas Agendadas (Final - Saldo Único, Sem Bônus Fixo e Sem Toggle) ---
 
 /**
  * @desc    Processa lucros diários para investimentos ativos e comissões.
@@ -1421,12 +1423,9 @@ const processDailyProfitsAndCommissions = async (req, res) => {
 
         // Busca as configurações de admin (necessário para comissões)
         const adminConfig = await AdminConfig.findOne(); 
-        const isPromotionActive = adminConfig ? adminConfig.isPromotionActive : false;
         const commissionRate = adminConfig ? adminConfig.commissionOnDailyProfit : 0;
         
-        // Bônus fixo e referidos necessários não são mais usados.
-
-        logInfo(`Iniciando processamento diário de lucros para ${investments.length} investimentos. Promoção Ativa: ${isPromotionActive}`);
+        logInfo(`Iniciando processamento diário de lucros para ${investments.length} investimentos.`);
 
         for (const investment of investments) {
             const user = investment.userId; // O usuário já populado (o referido)
@@ -1461,8 +1460,8 @@ const processDailyProfitsAndCommissions = async (req, res) => {
             investment.currentProfit += dailyProfit;
             user.balance += dailyProfit; // Credita no saldo principal do referido
 
-            // 3. LÓGICA DE COMISSÃO SOBRE LUCRO DIÁRIO (CRÉDITO NO SALDO PRINCIPAL)
-            if (isPromotionActive && commissionRate > 0 && user.invitedBy) {
+            // 3. LÓGICA DE COMISSÃO SOBRE LUCRO DIÁRIO (CRÉDITO NO SALDO PRINCIPAL, SEM CHECK DE ISPROMOTIONACTIVE)
+            if (commissionRate > 0 && user.invitedBy) {
                 // Busca o convidante (Inviter)
                 const inviter = await User.findOne({ referralCode: user.invitedBy });
 

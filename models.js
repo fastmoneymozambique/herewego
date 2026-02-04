@@ -70,7 +70,6 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Withdrawal',
     }],
-    // Removido: hasReceivedReferralBonus
     lastLoginIp: String, // Para fins informativos/logs
     lastLoginAt: Date,
     createdAt: {
@@ -282,11 +281,9 @@ const withdrawalSchema = new mongoose.Schema({
 // --- 6. AdminConfig Schema (Configurações globais) ---
 const adminConfigSchema = new mongoose.Schema({
     
-    // Configurações de Comissão
-    isPromotionActive: {
-        type: Boolean,
-        default: true,
-    },
+    // Configurações de Comissão (isPromotionActive removido, comissão é padrão)
+    // REMOVIDO: isPromotionActive
+    
     // Comissão sobre o valor investido (Ex: 0.05 para 5% do valor do plano)
     commissionOnPlanActivation: { 
         type: Number,
@@ -301,7 +298,6 @@ const adminConfigSchema = new mongoose.Schema({
         min: [0, 'A comissão diária deve ser 0 ou mais.'],
         max: [1, 'A comissão diária não pode ser maior que 1 (100%).'],
     },
-    // Removido: referralBonusAmount e referralRequiredInvestedCount
     
     // --- Configurações de Depósito ---
     minDepositAmount: {
