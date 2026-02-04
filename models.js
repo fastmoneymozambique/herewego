@@ -23,7 +23,7 @@ const userSchema = new mongoose.Schema({
         minlength: [6, 'A senha deve ter pelo menos 6 caracteres.'],
         select: false, // Não retorna a senha por padrão em consultas
     },
-    balance: { // Saldo Principal (Mantido)
+    balance: { // Saldo Principal (AGORA INCLUI COMISSÕES)
         type: Number,
         default: 0,
         min: [0, 'Saldo não pode ser negativo.'],
@@ -281,7 +281,27 @@ const withdrawalSchema = new mongoose.Schema({
 
 // --- 6. AdminConfig Schema (Configurações globais) ---
 const adminConfigSchema = new mongoose.Schema({
-    // Removido: isPromotionActive, referralBonusAmount, referralRequiredInvestedCount, commissionOnPlanActivation, commissionOnDailyProfit
+    
+    // Configurações de Comissão
+    isPromotionActive: {
+        type: Boolean,
+        default: true,
+    },
+    // Comissão sobre o valor investido (Ex: 0.05 para 5% do valor do plano)
+    commissionOnPlanActivation: { 
+        type: Number,
+        default: 0.05, 
+        min: [0, 'A comissão de ativação deve ser 0 ou mais.'],
+        max: [1, 'A comissão de ativação não pode ser maior que 1 (100%).'],
+    },
+    // Comissão sobre o lucro diário do referido (Ex: 0.02 para 2% do lucro diário)
+    commissionOnDailyProfit: { 
+        type: Number,
+        default: 0.02, 
+        min: [0, 'A comissão diária deve ser 0 ou mais.'],
+        max: [1, 'A comissão diária não pode ser maior que 1 (100%).'],
+    },
+    // Removido: referralBonusAmount e referralRequiredInvestedCount
     
     // --- Configurações de Depósito ---
     minDepositAmount: {
