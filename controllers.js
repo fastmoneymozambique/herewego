@@ -531,7 +531,7 @@ const activateInvestment = async (req, res) => {
             // Busca o convidante (Inviter)
             const inviter = await User.findOne({ referralCode: user.invitedBy });
 
-            if (inviter) {
+            if (inviter && inviter.status === 'active') { // VERIFICA STATUS ATIVO DO CONVIDANTE
                 const commissionRate = adminConfig.commissionOnPlanActivation;
                 const commissionAmount = amount * commissionRate;
                 
@@ -545,6 +545,8 @@ const activateInvestment = async (req, res) => {
                     amountInvested: amount, 
                     commission: commissionAmount 
                 });
+            } else if (inviter && inviter.status === 'blocked') {
+                 logInfo(`Comissão de Ativação de ${amount * adminConfig.commissionOnPlanActivation} MT NÃO creditada para ${inviter.phoneNumber}: CONTA BLOQUEADA.`, { inviterId: inviter._id, inviteeId: user._id });
             }
         }
         // FIM LÓGICA DE COMISSÃO POR ATIVAÇÃO
@@ -638,7 +640,7 @@ const upgradeInvestment = async (req, res) => {
         if (user.invitedBy && adminConfig && adminConfig.commissionOnPlanActivation > 0) {
              const inviter = await User.findOne({ referralCode: user.invitedBy });
 
-             if (inviter) {
+             if (inviter && inviter.status === 'active') { // VERIFICA STATUS ATIVO DO CONVIDANTE
                  const commissionRate = adminConfig.commissionOnPlanActivation;
                  const commissionAmount = priceDifference * commissionRate; // Comissão sobre a diferença paga
                  
@@ -652,6 +654,8 @@ const upgradeInvestment = async (req, res) => {
                      amountInvested: priceDifference, 
                      commission: commissionAmount 
                  });
+             } else if (inviter && inviter.status === 'blocked') {
+                 logInfo(`Comissão de Upgrade de ${priceDifference * adminConfig.commissionOnPlanActivation} MT NÃO creditada para ${inviter.phoneNumber}: CONTA BLOQUEADA.`, { inviterId: inviter._id, inviteeId: user._id });
              }
          }
         // FIM LÓGICA DE COMISSÃO POR ATIVAÇÃO NO UPGRADE
