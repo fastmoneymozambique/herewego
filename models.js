@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken'); // Para tokens de autenticação
 const { logError } = require('./utils'); // Para logging
 
 // --- 1. User Schema ---
-const userSchema = new mongoose.Schema({
+const userSchema = new new mongoose.Schema({
     phoneNumber: {
         type: String,
         required: [true, 'Número de telefone é obrigatório.'],
@@ -27,6 +27,12 @@ const userSchema = new mongoose.Schema({
         type: Number,
         default: 0,
         min: [0, 'Saldo não pode ser negativo.'],
+    },
+    // NOVO CAMPO: Total de comissões ganhas (para dashboard/histórico)
+    totalCommissionEarned: { 
+        type: Number,
+        default: 0,
+        min: [0, 'Total de comissão não pode ser negativo.'],
     },
     // Removido: bonusBalance
     status: {

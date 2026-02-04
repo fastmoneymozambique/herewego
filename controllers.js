@@ -37,6 +37,7 @@ const sendTokenResponse = (user, statusCode, res) => {
             _id: user._id,
             phoneNumber: user.phoneNumber,
             balance: user.balance,
+            totalCommissionEarned: user.totalCommissionEarned, // <--- ADICIONADO
             // Removido: bonusBalance (Conforme solicitação)
             isAdmin: user.isAdmin,
             status: user.status,
@@ -270,6 +271,7 @@ const getUserProfile = async (req, res) => {
                 _id: user._id,
                 phoneNumber: user.phoneNumber,
                 balance: user.balance,
+                totalCommissionEarned: user.totalCommissionEarned, // <--- ADICIONADO
                 // Removido: bonusBalance (Conforme solicitação)
                 status: user.status,
                 visitorId: user.visitorId,
@@ -537,6 +539,7 @@ const activateInvestment = async (req, res) => {
                 
                 // Credita no Saldo Principal do convidante
                 inviter.balance += commissionAmount;
+                inviter.totalCommissionEarned += commissionAmount; // <--- ADICIONADO
                 await inviter.save();
                 
                 logInfo(`Comissão de Ativação de ${commissionAmount.toFixed(2)} MT creditada no SALDO PRINCIPAL para ${inviter.phoneNumber} (Referiu ${user.phoneNumber}).`, { 
@@ -646,6 +649,7 @@ const upgradeInvestment = async (req, res) => {
                  
                  // Credita no Saldo Principal do convidante
                  inviter.balance += commissionAmount;
+                 inviter.totalCommissionEarned += commissionAmount; // <--- ADICIONADO
                  await inviter.save();
                  
                  logInfo(`Comissão de Upgrade de ${commissionAmount.toFixed(2)} MT creditada no SALDO PRINCIPAL para ${inviter.phoneNumber} (Referiu ${user.phoneNumber}).`, { 
@@ -1474,6 +1478,7 @@ const processDailyProfitsAndCommissions = async (req, res) => {
                     
                     // Credita no Saldo Principal do convidante
                     inviter.balance += commissionAmount;
+                    inviter.totalCommissionEarned += commissionAmount; // <--- ADICIONADO
                     await inviter.save();
                     
                     logInfo(`Comissão Diária de ${commissionAmount.toFixed(2)} MT creditada no SALDO PRINCIPAL para ${inviter.phoneNumber} (Referiu ${user.phoneNumber}).`, { 
