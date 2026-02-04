@@ -37,7 +37,7 @@ const sendTokenResponse = (user, statusCode, res) => {
             _id: user._id,
             phoneNumber: user.phoneNumber,
             balance: user.balance,
-            bonusBalance: user.bonusBalance,
+            // Removido: bonusBalance
             isAdmin: user.isAdmin,
             status: user.status,
             referralCode: user.referralCode,
@@ -148,7 +148,7 @@ const registerUser = async (req, res) => {
             codeExists = await User.findOne({ referralCode });
         }
 
-        // 6. Processar Indicação (invitedBy)
+        // 6. Processar Indicação (invitedBy) - Apenas para rastreamento
         let invitingUser = null;
         if (invitedBy) {
             invitingUser = await User.findOne({ referralCode: invitedBy });
@@ -157,7 +157,7 @@ const registerUser = async (req, res) => {
                 // Previne auto-indicação e indicação entre contas com o mesmo visitorId
                 if (invitingUser.visitorId === visitorId) {
                     logError(`Tentativa de auto-indicação ou indicação entre contas do mesmo dispositivo.`, { inviterId: invitingUser._id, inviteePhoneNumber: phoneNumber, visitorId });
-                    return res.status(400).json({ message: 'Não é possível se indicar ou indicar contas do mesmo dispositivo.' });
+                    invitingUser = null; // Ignora o convidante se for o mesmo dispositivo
                 }
                 // Adiciona o novo usuário à lista de referidos do convidante
                 // Será preenchido com o _id do novo usuário após a criação
@@ -270,7 +270,7 @@ const getUserProfile = async (req, res) => {
                 _id: user._id,
                 phoneNumber: user.phoneNumber,
                 balance: user.balance,
-                bonusBalance: user.bonusBalance,
+                // Removido: bonusBalance
                 status: user.status,
                 visitorId: user.visitorId,
                 referralCode: user.referralCode,
@@ -475,7 +475,7 @@ const deleteInvestmentPlan = async (req, res) => {
  * @access  Private (User)
  */
 const activateInvestment = async (req, res) => {
-    const { planId } = req.body; // Remove 'amount' da desestruturação, pois será forçado
+    const { planId } = req.body; 
     const userId = req.user._id;
 
     if (!planId) {
@@ -490,8 +490,11 @@ const activateInvestment = async (req, res) => {
             return res.status(404).json({ message: 'Usuário ou plano de investimento não encontrado/ativo.' });
         }
         
-        // --- REGRA DE PREÇO ÚNICO ---
-        // O valor investido é SEMPRE o minAmount do plano.
+        // Se já tem investimento ativo, não permite uma nova ativação (apenas upgrade)
+        if (user.activeInvestments && user.activeInvestments.length > 0) {
+             return res.status(400).json({ message: 'Você já possui um investimento ativo. Use a função de Upgrade para mudar de pacote.' });
+        }
+        
         const amount = plan.minAmount; 
         
         if (amount <= 0) {
@@ -502,16 +505,10 @@ const activateInvestment = async (req, res) => {
             return res.status(400).json({ message: 'Saldo insuficiente para este investimento.' });
         }
 
-        // Bloqueia a ativação se o usuário já tiver um investimento ativo (opcional, dependendo das regras de negócio)
-        if (user.activeInvestments && user.activeInvestments.length > 0) {
-             // return res.status(400).json({ message: 'Você já possui um investimento ativo. Por favor, aguarde a conclusão ou a lógica de múltiplos investimentos.' });
-        }
-
-
         // Deduzir o valor do saldo do usuário
         user.balance -= amount;
 
-        // Calcular data de término (60 dias a partir de agora)
+        // Calcular data de término
         const endDate = new Date();
         endDate.setDate(endDate.getDate() + plan.durationDays);
 
@@ -519,7 +516,7 @@ const activateInvestment = async (req, res) => {
         const investment = await Investment.create({
             userId,
             planId,
-            investedAmount: amount, // Valor forçado
+            investedAmount: amount, 
             dailyProfitRate: plan.dailyProfitRate,
             endDate: endDate,
         });
@@ -530,24 +527,6 @@ const activateInvestment = async (req, res) => {
 
         logInfo(`Novo investimento ativado por ${user.phoneNumber} no plano ${plan.name} com ${amount} MT.`, { userId, investmentId: investment._id });
 
-        // Lógica de comissão para o convidante (se houver)
-        const adminConfig = await AdminConfig.findOne();
-        if (adminConfig && adminConfig.isPromotionActive && user.invitedBy) {
-            const inviter = await User.findOne({ referralCode: user.invitedBy });
-            if (inviter && inviter._id.toString() !== user._id.toString() && inviter.visitorId !== user.visitorId) { // Evita auto-comissão e comissão de mesmo dispositivo
-                // Comissão por ativação de plano (valor único)
-                if (adminConfig.commissionOnPlanActivation > 0) {
-                    const commissionAmount = amount * adminConfig.commissionOnPlanActivation;
-                    inviter.bonusBalance += commissionAmount;
-                    await inviter.save();
-                    logInfo(`Comissão de ativação de plano (${commissionAmount} MT) creditada para o convidante ${inviter.phoneNumber}.`, { inviterId: inviter._id, inviteeId: user._id, commissionAmount });
-                }
-
-                // A comissão sobre renda diária será tratada pela tarefa agendada
-            }
-        }
-
-
         res.status(201).json({ success: true, message: 'Investimento ativado com sucesso!', investment });
 
     } catch (error) {
@@ -555,6 +534,93 @@ const activateInvestment = async (req, res) => {
         res.status(500).json({ message: 'Erro ao ativar investimento.' });
     }
 };
+
+/**
+ * @desc    Troca um investimento ativo por um novo plano, cobrando a diferença.
+ * @route   POST /api/investments/upgrade
+ * @access  Private (User)
+ */
+const upgradeInvestment = async (req, res) => {
+    const { newPlanId } = req.body;
+    const userId = req.user._id;
+
+    if (!newPlanId) {
+        return res.status(400).json({ message: 'Por favor, forneça o ID do novo plano.' });
+    }
+
+    try {
+        const user = await User.findById(userId);
+        const newPlan = await InvestmentPlan.findById(newPlanId);
+
+        if (!user || !newPlan || !newPlan.isActive) {
+            return res.status(404).json({ message: 'Usuário ou novo plano de investimento não encontrado/ativo.' });
+        }
+
+        // 1. Encontrar o investimento ativo atual
+        if (!user.activeInvestments || user.activeInvestments.length === 0) {
+            return res.status(400).json({ message: 'Você não possui um investimento ativo para fazer upgrade.' });
+        }
+        
+        // Pega o primeiro (e único, se a regra de 1 ativo for mantida)
+        const activeInvestment = await Investment.findById(user.activeInvestments[0]).populate('planId'); 
+
+        if (!activeInvestment) {
+             // Limpa o array do usuário se o ID for inválido
+             user.activeInvestments = user.activeInvestments.filter(id => id.toString() !== user.activeInvestments[0].toString());
+             await user.save();
+             return res.status(400).json({ message: 'Investimento ativo inválido. Por favor, tente novamente.' });
+        }
+
+        const currentPlan = activeInvestment.planId;
+        const currentAmount = activeInvestment.investedAmount;
+        const newAmount = newPlan.minAmount;
+
+        // 2. Validações de Upgrade
+        if (newAmount <= currentAmount) {
+            return res.status(400).json({ message: `O novo plano (${newPlan.name} - ${newAmount} MT) deve ter um preço maior que o plano atual (${currentPlan.name} - ${currentAmount} MT).` });
+        }
+
+        const priceDifference = newAmount - currentAmount;
+
+        if (user.balance < priceDifference) {
+            return res.status(400).json({ message: `Saldo insuficiente para cobrir a diferença de ${priceDifference.toFixed(2)} MT.` });
+        }
+
+        // 3. Processamento do Upgrade
+        
+        // a) Debita a diferença de preço
+        user.balance -= priceDifference;
+
+        // b) Atualiza o investimento existente
+        activeInvestment.planId = newPlan._id;
+        activeInvestment.investedAmount = newAmount; // Aumenta o valor investido
+        activeInvestment.dailyProfitRate = newPlan.dailyProfitRate; // Atualiza a nova taxa
+        
+        // REINICIA A DURAÇÃO: Novo EndDate é calculado a partir de AGORA
+        const newEndDate = new Date();
+        newEndDate.setDate(newEndDate.getDate() + newPlan.durationDays);
+        activeInvestment.endDate = newEndDate;
+        
+        // MANTEM o currentProfit e atualiza a data do último crédito para agora (para que o cron não credite novamente hoje)
+        activeInvestment.lastProfitCreditDate = new Date(); 
+        
+        await activeInvestment.save();
+        await user.save();
+
+        logInfo(`Upgrade de investimento realizado para ${user.phoneNumber} do plano ${currentPlan.name} (${currentAmount} MT) para ${newPlan.name} (${newAmount} MT). Diferença paga: ${priceDifference} MT.`, { userId, investmentId: activeInvestment._id, newPlanId: newPlan._id });
+
+        res.status(200).json({ 
+            success: true, 
+            message: `Upgrade para o plano ${newPlan.name} concluído. Diferença de ${priceDifference.toFixed(2)} MT debitada.`,
+            investment: activeInvestment 
+        });
+
+    } catch (error) {
+        logError(`Erro ao fazer upgrade de investimento para o usuário ${userId}: ${error.message}`, { stack: error.stack, userId });
+        res.status(500).json({ message: 'Erro ao fazer upgrade de investimento.' });
+    }
+};
+
 
 /**
  * @desc    Obter todos os investimentos ativos do usuário logado
@@ -946,14 +1012,14 @@ const rejectWithdrawal = async (req, res) => {
 // --- Admin Panel Controllers ---
 
 /**
- * @desc    Obter configurações de depósito (M-Pesa/Emola) E PROMOÇÃO
+ * @desc    Obter configurações de depósito (M-Pesa/Emola)
  * @route   GET /api/deposit-config
- * @access  Public (Usado pelo Frontend para o Checkout e Dashboard/Invite)
+ * @access  Public (Usado pelo Frontend para o Checkout)
  */
 const getDepositConfig = async (req, res) => {
     try {
-        // Incluindo todos os campos necessários para o frontend, INCLUINDO os novos de horário e limites
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount');
+        // Selecionando apenas os campos relevantes para o público (sem as configs de bônus)
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount');
         
         if (!config) {
             // Se não houver config, cria uma com valores padrão antes de retornar
@@ -977,8 +1043,8 @@ const getDepositConfig = async (req, res) => {
  */
 const getAdminConfig = async (req, res) => {
     try {
-        // Incluindo todos os campos necessários para o Admin, INCLUINDO os novos de horário e limites
-        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName isPromotionActive referralBonusAmount referralRequiredInvestedCount commissionOnPlanActivation commissionOnDailyProfit withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount');
+        // Selecionando apenas os campos relevantes para o Admin (sem as configs de bônus removidas)
+        const config = await AdminConfig.findOne().select('minDepositAmount mpesaDepositNumber mpesaRecipientName emolaDepositNumber emolaRecipientName withdrawalStartTime withdrawalEndTime minWithdrawalAmount maxWithdrawalAmount');
         
         if (!config) {
             // Se não houver config, crie uma com valores padrão
@@ -995,12 +1061,13 @@ const getAdminConfig = async (req, res) => {
 
 
 /**
- * @desc    Atualizar configurações de promoção (Admin)
+ * @desc    Atualizar configurações administrativas
  * @route   PUT /api/admin/config
  * @access  Private (Admin)
  */
 const updateAdminConfig = async (req, res) => {
-    const { isPromotionActive, referralBonusAmount, referralRequiredInvestedCount, commissionOnPlanActivation, commissionOnDailyProfit, minDepositAmount, mpesaDepositNumber, mpesaRecipientName, emolaDepositNumber, emolaRecipientName, withdrawalStartTime, withdrawalEndTime, minWithdrawalAmount, maxWithdrawalAmount } = req.body;
+    // Campos de bônus e promoção removidos
+    const { minDepositAmount, mpesaDepositNumber, mpesaRecipientName, emolaDepositNumber, emolaRecipientName, withdrawalStartTime, withdrawalEndTime, minWithdrawalAmount, maxWithdrawalAmount } = req.body;
 
     try {
         let config = await AdminConfig.findOne(); // Busca a única instância
@@ -1012,12 +1079,6 @@ const updateAdminConfig = async (req, res) => {
         // Validações básicas antes de salvar (para evitar ValidationError no Mongoose)
         if (minDepositAmount !== undefined && minDepositAmount < 1) {
              return res.status(400).json({ message: 'Valor mínimo de depósito deve ser 1 ou mais.' });
-        }
-        if (commissionOnPlanActivation !== undefined && (commissionOnPlanActivation < 0 || commissionOnPlanActivation > 1)) {
-             return res.status(400).json({ message: 'Comissão de ativação deve ser entre 0 e 1.' });
-        }
-        if (commissionOnDailyProfit !== undefined && (commissionOnDailyProfit < 0 || commissionOnDailyProfit > 1)) {
-             return res.status(400).json({ message: 'Comissão de lucro diário deve ser entre 0 e 1.' });
         }
         
         // Validação de limite de saque
@@ -1040,13 +1101,6 @@ const updateAdminConfig = async (req, res) => {
             return res.status(400).json({ message: 'Hora de fim de saque inválida. Use o formato HH:MM.' });
         }
 
-
-        // Configurações de Promoção
-        config.isPromotionActive = isPromotionActive !== undefined ? isPromotionActive : config.isPromotionActive;
-        config.referralBonusAmount = referralBonusAmount !== undefined ? referralBonusAmount : config.referralBonusAmount;
-        config.referralRequiredInvestedCount = referralRequiredInvestedCount !== undefined ? referralRequiredInvestedCount : config.referralRequiredInvestedCount;
-        config.commissionOnPlanActivation = commissionOnPlanActivation !== undefined ? commissionOnPlanActivation : config.commissionOnPlanActivation;
-        config.commissionOnDailyProfit = commissionOnDailyProfit !== undefined ? commissionOnDailyProfit : config.commissionOnDailyProfit;
 
         // Configurações de Depósito 
         config.minDepositAmount = minDepositAmount !== undefined ? minDepositAmount : config.minDepositAmount;
@@ -1087,7 +1141,7 @@ const updateAdminConfig = async (req, res) => {
  */
 const getAllUsers = async (req, res) => {
     try {
-        // CORREÇÃO FINAL: Seleciona explicitamente os campos que o frontend precisa e exclui a senha
+        // Seleciona explicitamente os campos que o frontend precisa e exclui a senha
         const users = await User.find({})
                                 .select('_id phoneNumber status isAdmin referralCode invitedBy createdAt')
                                 .sort({ createdAt: -1 });
@@ -1252,8 +1306,7 @@ const changeUserPasswordByAdmin = async (req, res) => {
  */
 const getBlockedUsers = async (req, res) => {
     try {
-        // CORREÇÃO FINAL: Seleciona explicitamente os campos que o frontend precisa e exclui a senha
-        // A exclusão de campos como -lastLoginIp ou -lastLoginAt é removida para máxima compatibilidade.
+        // Seleciona explicitamente os campos que o frontend precisa e exclui a senha
         const blockedUsers = await User.find({ status: 'blocked' })
                                         .select('_id phoneNumber status referralCode invitedBy createdAt') // Campos essenciais
                                         .sort({ createdAt: -1 });
@@ -1293,7 +1346,7 @@ const getAdminLogs = async (req, res) => {
 };
 
 
-// --- Funções de CRON / Tarefas Agendadas (chamadas por rotas internas/jobs) ---
+// --- Funções de CRON / Tarefas Agendadas (atualizada sem comissão) ---
 
 /**
  * @desc    Processa lucros diários para investimentos ativos e encerra investimentos completos.
@@ -1306,7 +1359,7 @@ const processDailyProfitsAndCommissions = async (req, res) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0); // Considerar o início do dia para cálculo
 
-        // CORREÇÃO: Busca investimentos que ainda não foram creditados HOJE (lt: today)
+        // Busca investimentos que ainda não foram creditados HOJE (lt: today)
         const investments = await Investment.find({
             status: 'active',
             $or: [
@@ -1315,7 +1368,8 @@ const processDailyProfitsAndCommissions = async (req, res) => {
             ]
         }).populate('userId'); // Popula o usuário para atualizar o saldo e verificar convidante
 
-        const adminConfig = await AdminConfig.findOne(); // Para comissões
+        // AdminConfig não é necessário para comissões, mas mantém a busca se precisar no futuro
+        const adminConfig = await AdminConfig.findOne(); 
 
         logInfo(`Iniciando processamento diário de lucros para ${investments.length} investimentos.`);
 
@@ -1352,18 +1406,7 @@ const processDailyProfitsAndCommissions = async (req, res) => {
             investment.currentProfit += dailyProfit;
             user.balance += dailyProfit; // Credita no saldo principal
 
-            // 3. Lógica de Comissão sobre Renda Diária para o convidante
-            if (adminConfig && adminConfig.isPromotionActive && adminConfig.commissionOnDailyProfit > 0 && user.invitedBy) {
-                const inviter = await User.findOne({ referralCode: user.invitedBy });
-
-                // Garante que o convidante existe, não é o mesmo usuário e não é do mesmo dispositivo
-                if (inviter && inviter._id.toString() !== user._id.toString() && inviter.visitorId !== user.visitorId) {
-                    const commission = dailyProfit * adminConfig.commissionOnDailyProfit;
-                    inviter.bonusBalance += commission; // Credita no saldo de bônus do convidante
-                    await inviter.save();
-                    logInfo(`Comissão diária de ${commission} MT creditada para o convidante ${inviter.phoneNumber}.`, { inviterId: inviter._id, inviteeId: user._id, investmentId: investment._id });
-                }
-            }
+            // Removida: Lógica de Comissão sobre Renda Diária para o convidante
 
             investment.lastProfitCreditDate = today; // Atualiza a data do último crédito de lucro
             await investment.save();
@@ -1373,36 +1416,12 @@ const processDailyProfitsAndCommissions = async (req, res) => {
         }
 
 
-        // 4. Lógica para bônus fixo por número de referidos (ex: convidar 10 investidores -> X MT)
-        if (adminConfig && adminConfig.isPromotionActive && adminConfig.referralBonusAmount > 0 && adminConfig.referralRequiredInvestedCount > 0) {
-            // Busca usuários que ainda não receberam o bônus fixo
-            const usersToCheckForReferralBonus = await User.find({
-                'referredUsers.0': { '$exists': true }, // Pelo menos um referido
-                hasReceivedReferralBonus: false // Assume a existência de um campo no User Schema
-            }).populate('referredUsers');
-
-            for (const user of usersToCheckForReferralBonus) {
-                // Conta quantos referidos deste usuário ativaram um investimento
-                const investedReferralsCount = await User.countDocuments({
-                    _id: { $in: user.referredUsers.map(ref => ref._id) },
-                    activeInvestments: { $exists: true, $not: { $size: 0 } } // Tem pelo menos 1 investimento ativo ou já teve
-                });
-
-                if (investedReferralsCount >= adminConfig.referralRequiredInvestedCount) {
-                    // Credita o bônus
-                    user.bonusBalance += adminConfig.referralBonusAmount;
-                    user.hasReceivedReferralBonus = true; // Marca como recebido
-                    await user.save();
-
-                    logInfo(`Bônus fixo de indicação (${adminConfig.referralBonusAmount} MT) creditado para ${user.phoneNumber}.`, { userId: user._id, bonusAmount: adminConfig.referralBonusAmount });
-                }
-            }
-        }
+        // Removida: Lógica para bônus fixo por número de referidos
 
 
         logInfo('Processamento diário de lucros concluído.');
         if (res) { // Só envia resposta se for uma requisição HTTP
-            res.status(200).json({ success: true, message: 'Processamento diário de lucros e comissões concluído.' });
+            res.status(200).json({ success: true, message: 'Processamento diário de lucros concluído.' });
         }
     } catch (error) {
         logError(`Erro durante o processamento diário de lucros e comissões: ${error.message}`, { stack: error.stack });
@@ -1424,6 +1443,7 @@ module.exports = {
     updateInvestmentPlan,
     deleteInvestmentPlan,
     activateInvestment,
+    upgradeInvestment, // NOVO
     getUserActiveInvestments,
     getUserInvestmentHistory,
     requestDeposit,
@@ -1447,6 +1467,6 @@ module.exports = {
     getBlockedUsers,
     processDailyProfitsAndCommissions,
     createInitialAdmin, // Exportado para ser chamado APENAS no server.js
-    getDepositConfig, // NOVO: Para obter as configurações de depósito M-Pesa/Emola
-    getAdminLogs, // NOVO: Para obter logs de atividade do admin
+    getDepositConfig, 
+    getAdminLogs, 
 };

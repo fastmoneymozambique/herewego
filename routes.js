@@ -8,11 +8,12 @@ const {
     loginUser,
     getUserProfile,
     createInvestmentPlan,
-    getInvestmentPlans, // AGORA INTELIGENTE: Retorna todos se for admin
+    getInvestmentPlans,
     getInvestmentPlanById,
     updateInvestmentPlan,
     deleteInvestmentPlan,
     activateInvestment,
+    upgradeInvestment, // NOVO: Importa o novo controlador
     getUserActiveInvestments,
     getUserInvestmentHistory,
     requestDeposit,
@@ -35,10 +36,11 @@ const {
     changeUserPasswordByAdmin,
     getBlockedUsers,
     processDailyProfitsAndCommissions,
-    getDepositConfig, // Controlador para obter configurações de depósito M-Pesa/Emola
+    getDepositConfig,
+    getAdminLogs,
 } = require('./controllers'); // Importa todos os controladores
 const { protect, authorizeAdmin } = require('./middleware'); // Importa os middlewares de segurança
-const { upload, uploadToCloudinary } = require('./uploadMiddleware'); // NOVO: Importa middlewares de upload
+const { upload, uploadToCloudinary } = require('./uploadMiddleware'); // Importa middlewares de upload
 
 const router = express.Router(); // Cria uma instância de router do Express
 
@@ -62,6 +64,7 @@ const appRoutes = (app) => {
 
     // --- Rotas de Investimento do Usuário ---
     router.post('/investments', protect, activateInvestment); // Ativar um novo investimento
+    router.post('/investments/upgrade', protect, upgradeInvestment); // NOVO: Fazer upgrade de investimento
     router.get('/investments/active', protect, getUserActiveInvestments); // Ver investimentos ativos
     router.get('/investments/history', protect, getUserInvestmentHistory); // Ver histórico de investimentos
 
@@ -118,6 +121,9 @@ const appRoutes = (app) => {
     router.put('/admin/users/:id/unblock', protect, authorizeAdmin, unblockUser);
     router.post('/admin/users/create-admin', protect, authorizeAdmin, createAdmin); // Criar novos admins
     router.put('/admin/users/:id/change-password', protect, authorizeAdmin, changeUserPasswordByAdmin);
+    
+    // Logs de Admin
+    router.get('/admin/logs/admin-actions', protect, authorizeAdmin, getAdminLogs); 
 
     // Gerenciamento de Configurações Administrativas / Promoções
     router.get('/admin/config', protect, authorizeAdmin, getAdminConfig);

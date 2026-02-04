@@ -23,16 +23,12 @@ const userSchema = new mongoose.Schema({
         minlength: [6, 'A senha deve ter pelo menos 6 caracteres.'],
         select: false, // Não retorna a senha por padrão em consultas
     },
-    balance: {
+    balance: { // Saldo Principal (Mantido)
         type: Number,
         default: 0,
         min: [0, 'Saldo não pode ser negativo.'],
     },
-    bonusBalance: {
-        type: Number,
-        default: 0,
-        min: [0, 'Saldo de bônus não pode ser negativo.'],
-    },
+    // Removido: bonusBalance
     status: {
         type: String,
         enum: ['active', 'blocked'],
@@ -48,17 +44,17 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
-    referralCode: {
+    referralCode: { // Mantido para rastreamento de referidos
         type: String,
         unique: true,
         sparse: true, // Permite que seja nulo e ainda assim único
     },
-    invitedBy: {
+    invitedBy: { // Mantido para rastreamento de referidos
         type: String, // O referralCode do usuário que convidou
         ref: 'User', // Referência ao modelo User
         sparse: true,
     },
-    referredUsers: [{
+    referredUsers: [{ // Mantido para rastreamento de referidos
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
     }],
@@ -74,10 +70,7 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Withdrawal',
     }],
-    hasReceivedReferralBonus: { 
-        type: Boolean,
-        default: false,
-    },
+    // Removido: hasReceivedReferralBonus
     lastLoginIp: String, // Para fins informativos/logs
     lastLoginAt: Date,
     createdAt: {
@@ -143,12 +136,10 @@ const investmentPlanSchema = new mongoose.Schema({
         type: Boolean,
         default: true,
     },
-    // --- NOVO CAMPO PARA IMAGEM ---
     imageUrl: {
         type: String,
         default: 'https://res.cloudinary.com/default-image-url', // URL padrão ou placeholder
     },
-    // --- FIM NOVO CAMPO ---
     createdAt: {
         type: Date,
         default: Date.now,
@@ -288,34 +279,9 @@ const withdrawalSchema = new mongoose.Schema({
     timestamps: true,
 });
 
-// --- 6. AdminConfig Schema (Para configurações globais e de promoção) ---
+// --- 6. AdminConfig Schema (Configurações globais) ---
 const adminConfigSchema = new mongoose.Schema({
-    isPromotionActive: {
-        type: Boolean,
-        default: true, // A promoção de indicação pode ser ativada/desativada
-    },
-    referralBonusAmount: { // Ex: 20 MT por X indicações
-        type: Number,
-        default: 0,
-        min: [0, 'Valor do bônus não pode ser negativo.'],
-    },
-    referralRequiredInvestedCount: { // Ex: 10 usuários para ganhar o bônus fixo
-        type: Number,
-        default: 0,
-        min: [0, 'Número de usuários referidos deve ser 0 ou mais.'],
-    },
-    commissionOnPlanActivation: { // Ex: 0.05 para 5% do valor investido
-        type: Number,
-        default: 0,
-        min: [0, 'Comissão de ativação não pode ser negativa.'],
-        max: [1, 'Comissão de ativação não pode ser maior que 1 (100%).'],
-    },
-    commissionOnDailyProfit: { // Ex: 0.01 para 1% do lucro diário do referido
-        type: Number,
-        default: 0,
-        min: [0, 'Comissão de lucro diário não pode ser negativa.'],
-        max: [1, 'Comissão de lucro diário não pode ser maior que 1 (100%).'],
-    },
+    // Removido: isPromotionActive, referralBonusAmount, referralRequiredInvestedCount, commissionOnPlanActivation, commissionOnDailyProfit
     
     // --- Configurações de Depósito ---
     minDepositAmount: {
@@ -357,17 +323,17 @@ const adminConfigSchema = new mongoose.Schema({
             message: props => `${props.value} não é um formato de hora válido (HH:MM)!`
         }
     },
-    minWithdrawalAmount: { // NOVO CAMPO
+    minWithdrawalAmount: { 
         type: Number,
         default: 1, 
         min: [1, 'Valor mínimo de saque deve ser 1 ou mais.'],
     },
-    maxWithdrawalAmount: { // NOVO CAMPO
+    maxWithdrawalAmount: { 
         type: Number,
         default: 5000, 
         min: [1, 'Valor máximo de saque deve ser 1 ou mais.'],
     },
-    // --- FIM NOVO: Configurações de Saque ---
+    // --- FIM Configurações de Saque ---
 
     // Garante que só haverá um documento de configurações
     singletonId: {
