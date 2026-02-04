@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken'); // Para tokens de autenticação
 const { logError } = require('./utils'); // Para logging
 
 // --- 1. User Schema ---
-const userSchema = new new mongoose.Schema({
+const userSchema = new mongoose.Schema({ // <--- LINHA CORRIGIDA
     phoneNumber: {
         type: String,
         required: [true, 'Número de telefone é obrigatório.'],
