@@ -13,7 +13,7 @@ const {
     updateInvestmentPlan,
     deleteInvestmentPlan,
     activateInvestment,
-    upgradeInvestment, // NOVO: Importa o novo controlador
+    upgradeInvestment,
     getUserActiveInvestments,
     getUserInvestmentHistory,
     requestDeposit,
@@ -39,6 +39,7 @@ const {
     getDepositConfig,
     getAdminLogs,
 } = require('./controllers'); // Importa todos os controladores
+
 const { protect, authorizeAdmin } = require('./middleware'); // Importa os middlewares de segurança
 const { upload, uploadToCloudinary } = require('./uploadMiddleware'); // Importa middlewares de upload
 
@@ -50,90 +51,88 @@ const router = express.Router(); // Cria uma instância de router do Express
  * @param {object} app - A instância do aplicativo Express.
  */
 const appRoutes = (app) => {
-    // --- Rotas de Autenticação e Usuário (Públicas e Privadas) ---
+    
+    // --- Rotas de Autenticação e Usuário (Públicas) ---
     router.post('/register', registerUser);
     router.post('/login', loginUser);
-    router.get('/profile', protect, getUserProfile); // Perfil do usuário logado
-
-    // --- Rotas de Configuração Pública (Novo para o Checkout) ---
-    router.get('/deposit-config', getDepositConfig); // Configs de depósito M-Pesa/Emola
-
-    // --- Rotas de Planos de Investimento (Públicas para leitura, Admin para CRUD) ---
-    router.get('/investmentplans', getInvestmentPlans); // Todos podem ver os planos (Ativos)
-    router.get('/investmentplans/:id', getInvestmentPlanById); // Todos podem ver um plano específico
-
-    // --- Rotas de Investimento do Usuário ---
-    router.post('/investments', protect, activateInvestment); // Ativar um novo investimento
-    router.post('/investments/upgrade', protect, upgradeInvestment); // NOVO: Fazer upgrade de investimento
-    router.get('/investments/active', protect, getUserActiveInvestments); // Ver investimentos ativos
-    router.get('/investments/history', protect, getUserInvestmentHistory); // Ver histórico de investimentos
-
-    // --- Rotas de Depósito do Usuário ---
-    router.post('/deposits', protect, requestDeposit); // Solicitar um depósito
-    router.get('/deposits/history', protect, getUserDeposits); // Ver histórico de depósitos do usuário
-
-    // --- Rotas de Saque do Usuário ---
-    router.post('/withdrawals', protect, requestWithdrawal); // Solicitar um saque
-    router.get('/withdrawals/history', protect, getUserWithdrawals); // Ver histórico de saques do usuário
-
-    // --- Rotas do Painel Administrativo (Exigem autenticação e autorização de Admin) ---
-
-    // Gerenciamento de Planos de Investimento
-    router.get('/admin/investmentplans', protect, authorizeAdmin, getInvestmentPlans); 
     
-    // Rota de Criação com Upload de Imagem
+    // --- Rotas de Usuário Logado (Privadas - Protect) ---
+    router.get('/profile', protect, getUserProfile); 
+    
+    // Configurações de depósito para o Checkout (Público para facilitar o carregamento)
+    router.get('/deposit-config', getDepositConfig);
+
+    // --- Rotas de Planos de Investimento (Leitura Pública) ---
+    router.get('/investmentplans', getInvestmentPlans); 
+    router.get('/investmentplans/:id', getInvestmentPlanById); 
+
+    // --- Rotas de Investimento do Usuário (Privadas) ---
+    router.post('/investments', protect, activateInvestment); 
+    router.post('/investments/upgrade', protect, upgradeInvestment); 
+    router.get('/investments/active', protect, getUserActiveInvestments); 
+    router.get('/investments/history', protect, getUserInvestmentHistory); 
+
+    // --- Rotas de Depósito do Usuário (Privadas) ---
+    router.post('/deposits', protect, requestDeposit); 
+    router.get('/deposits/history', protect, getUserDeposits); 
+
+    // --- Rotas de Saque do Usuário (Privadas) ---
+    router.post('/withdrawals', protect, requestWithdrawal); 
+    router.get('/withdrawals/history', protect, getUserWithdrawals); 
+
+    // --- Rotas do Painel Administrativo (Exigem Autenticação e Autorização de Admin) ---
+
+    // Gerenciamento de Planos de Investimento (CRUD)
+    router.get('/admin/investmentplans', protect, authorizeAdmin, getInvestmentPlans); 
     router.post('/admin/investmentplans', 
         protect, 
         authorizeAdmin, 
-        upload.single('image'), // 1. Multer processa o campo 'image'
-        uploadToCloudinary, // 2. Envia para o Cloudinary e coloca a URL em req.uploadedImageUrl
-        createInvestmentPlan); // 3. Controller salva o plano com a nova URL
-    
-    // Rota de Atualização com Upload de Imagem
+        upload.single('image'), 
+        uploadToCloudinary, 
+        createInvestmentPlan
+    );
     router.put('/admin/investmentplans/:id', 
         protect, 
         authorizeAdmin, 
-        upload.single('image'), // 1. Multer processa o campo 'image'
-        uploadToCloudinary, // 2. Envia para o Cloudinary
-        updateInvestmentPlan); // 3. Controller atualiza o plano com a nova URL
-        
+        upload.single('image'), 
+        uploadToCloudinary, 
+        updateInvestmentPlan
+    );
     router.delete('/admin/investmentplans/:id', protect, authorizeAdmin, deleteInvestmentPlan);
 
-    // Gerenciamento de Depósitos
+    // Gerenciamento de Depósitos Administrativo
     router.get('/admin/deposits/pending', protect, authorizeAdmin, getPendingDeposits);
     router.put('/admin/deposits/:id/approve', protect, authorizeAdmin, approveDeposit);
     router.put('/admin/deposits/:id/reject', protect, authorizeAdmin, rejectDeposit);
 
-    // Gerenciamento de Saques
+    // Gerenciamento de Saques Administrativo
     router.get('/admin/withdrawals/pending', protect, authorizeAdmin, getPendingWithdrawals);
     router.put('/admin/withdrawals/:id/approve', protect, authorizeAdmin, approveWithdrawal);
     router.put('/admin/withdrawals/:id/reject', protect, authorizeAdmin, rejectWithdrawal);
 
-    // Gerenciamento de Usuários
-    router.get('/admin/users', protect, authorizeAdmin, getAllUsers); // LISTAR TODOS
-
-    // CRÍTICO: Rota fixa '/blocked' DEVE vir antes de rotas dinâmicas como '/:id'
-    router.get('/admin/users/blocked', protect, authorizeAdmin, getBlockedUsers); // LISTAR BLOQUEADOS
-    
-    router.get('/admin/users/:id', protect, authorizeAdmin, getUserDetails); // DETALHES DE UM ÚNICO USUÁRIO
-    
+    // Gerenciamento de Usuários Administrativo
+    // NOTA: Rotas estáticas como '/blocked' devem vir ANTES das rotas dinâmicas como '/:id'
+    router.get('/admin/users/blocked', protect, authorizeAdmin, getBlockedUsers); 
+    router.get('/admin/users', protect, authorizeAdmin, getAllUsers); 
+    router.get('/admin/users/:id', protect, authorizeAdmin, getUserDetails); 
     router.put('/admin/users/:id/block', protect, authorizeAdmin, blockUser);
     router.put('/admin/users/:id/unblock', protect, authorizeAdmin, unblockUser);
-    router.post('/admin/users/create-admin', protect, authorizeAdmin, createAdmin); // Criar novos admins
+    router.post('/admin/users/create-admin', protect, authorizeAdmin, createAdmin); 
     router.put('/admin/users/:id/change-password', protect, authorizeAdmin, changeUserPasswordByAdmin);
     
-    // Logs de Admin
+    // Logs de Atividade do Admin
     router.get('/admin/logs/admin-actions', protect, authorizeAdmin, getAdminLogs); 
 
-    // Gerenciamento de Configurações Administrativas / Promoções
+    // Configurações Globais do Sistema (Comissões, Limites, Horários)
     router.get('/admin/config', protect, authorizeAdmin, getAdminConfig);
     router.put('/admin/config', protect, authorizeAdmin, updateAdminConfig);
 
-    // --- Rota Interna para Tarefas Agendadas (CRON) ---
-    router.post('/internal/process-daily-profits', protect, authorizeAdmin, processDailyProfitsAndCommissions);
+    // --- Rotas Internas para Tarefas Agendadas (CRON) ---
+    // Alterado para GET para permitir que serviços externos (cron-job.org) chamem a URL facilmente
+    router.get('/internal/process-daily-profits', processDailyProfitsAndCommissions);
+    router.post('/internal/process-daily-profits', processDailyProfitsAndCommissions);
 
-
-    // Conecta todas as rotas definidas com o prefixo /api
+    // Conecta todas as rotas definidas ao aplicativo Express com o prefixo /api
     app.use('/api', router);
 };
 
